@@ -2696,12 +2696,12 @@ export default function ConfigEditor() {
       {/* Sidebar */}
       <div className="editor-sidebar">
         <div className="sidebar-header">
-          <span className="sidebar-title">&#9881; {t('editor.title')}</span>
           <div className="sidebar-header-actions">
             <Link to="/" className="back-btn">
               &larr; {t('editor.dashboard')}
             </Link>
           </div>
+          <span className="sidebar-title">&#9881; {t('editor.title')}</span>
         </div>
 
         {/* Mode tabs */}
