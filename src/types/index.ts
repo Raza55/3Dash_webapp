@@ -249,8 +249,18 @@ export interface FullConfig {
 export interface HAStateAttributes {
   brightness?: number;
   color_temp?: number;
+  color_temp_kelvin?: number;
+  min_color_temp_kelvin?: number;
+  max_color_temp_kelvin?: number;
+  hs_color?: [number, number];
+  xy_color?: [number, number];
   rgb_color?: [number, number, number];
   white_value?: number;
+  color_mode?: string;
+  supported_color_modes?: string[];
+  effect?: string;
+  effect_list?: string[];
+  friendly_name?: string;
   [key: string]: unknown;
 }
 
@@ -258,6 +268,11 @@ export interface HAState {
   entity_id: string;
   state: string;
   attributes: HAStateAttributes;
+}
+
+export interface LightSceneOption {
+  entityId: string;
+  label: string;
 }
 
 // --- Network Speed Tubes ---

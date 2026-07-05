@@ -24,7 +24,8 @@
   background-size: var(--panel-dots-size);
   border: var(--panel-border-width) solid var(--panel-border);
   border-radius: var(--corner-radius);
-  width: 280px;
+  width: min(340px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
   overflow: hidden;
 }
 
@@ -88,6 +89,8 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  max-height: calc(100vh - 104px);
+  overflow-y: auto;
 }
 
 .modal-row {
@@ -182,6 +185,10 @@
   background: linear-gradient(to right, #1e293b, #ffffff);
 }
 
+.modal-slider.saturation {
+  background: linear-gradient(to right, #e5e7eb, #22d3ee, #7c3aed, #ef4444);
+}
+
 .modal-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 14px; height: 14px;
@@ -208,6 +215,58 @@
 .hue-ring-wrap {
   display: flex;
   justify-content: center;
+}
+
+.modal-select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.86);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 7px 9px;
+  outline: none;
+}
+
+.scene-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scene-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  max-height: 132px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.scene-chip {
+  border: 1px solid rgba(56, 189, 248, 0.32);
+  border-radius: 6px;
+  background: rgba(14, 165, 233, 0.11);
+  color: var(--text);
+  min-height: 32px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .scene-chip:hover {
+    border-color: rgba(56, 189, 248, 0.72);
+    background: rgba(14, 165, 233, 0.2);
+  }
 }
 
 .modal-divider {

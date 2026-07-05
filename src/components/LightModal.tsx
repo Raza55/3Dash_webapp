@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import ColorWheel, { hslToRgb } from './ColorWheel';
-import { kelvinToRGB, miredToKelvin } from '../utils/color';
-import type { LightType, HAState } from '../types';
+import { miredToKelvin } from '../utils/color';
+import type { LightType, HAState, LightSceneOption } from '../types';
 import { useTranslation } from '../contexts/LanguageContext';
 import './LightModal.css';
 
@@ -14,11 +14,48 @@ interface Props {
   onClose: () => void;
   onToggle: (entityId: string) => void;
   onBrightness: (entityId: string, brightness: number) => void;
-  onColorTemp: (entityId: string, colorTemp: number) => void;
-  onColor: (entityId: string, color: { r: number; g: number; b: number }, brightness: number) => void;
+  onColorTemp: (entityId: string, colorTempKelvin: number) => void;
+  onColor: (entityId: string, color: { r: number; g: number; b: number }, brightness: number, hsColor?: { h: number; s: number }) => void;
   onWhiteChannel: (entityId: string, white: number) => void;
+  onEffect: (entityId: string, effect: string) => void;
+  onActivateScene: (entityId: string) => void;
+  sceneOptions: LightSceneOption[];
   doubleTapEntityId?: string;
   doubleTapState?: HAState | null;
+}
+
+const DEFAULT_MIN_KELVIN = 2000;
+const DEFAULT_MAX_KELVIN = 6500;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function toNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function rgbToHueSat([r, g, b]: [number, number, number]): { h: number; s: number } {
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const d = max - min;
+  let h = 0;
+  if (d > 0) {
+    if (max === rn) h = ((gn - bn) / d + 6) % 6;
+    else if (max === gn) h = (bn - rn) / d + 2;
+    else h = (rn - gn) / d + 4;
+    h *= 60;
+  }
+  const s = max === 0 ? 0 : (d / max) * 100;
+  return { h: Math.round(h), s: Math.round(s) };
+}
+
+function supportedModes(state: HAState | null): string[] {
+  const modes = state?.attributes.supported_color_modes;
+  return Array.isArray(modes) ? modes.filter((m): m is string => typeof m === 'string') : [];
 }
 
 export default function LightModal({
@@ -33,40 +70,55 @@ export default function LightModal({
   onColorTemp,
   onColor,
   onWhiteChannel,
+  onEffect,
+  onActivateScene,
+  sceneOptions,
   doubleTapEntityId,
   doubleTapState,
 }: Props) {
   const t = useTranslation();
   const [brightness, setBrightness] = useState(255);
-  const [colorTemp, setColorTemp] = useState(300);
+  const [colorTempKelvin, setColorTempKelvin] = useState(3000);
   const [whiteValue, setWhiteValue] = useState(0);
   const [hue, setHue] = useState(0);
+  const [saturation, setSaturation] = useState(100);
   const [whiteKelvin, setWhiteKelvin] = useState(4000);
+  const [effect, setEffect] = useState('');
   const [isOn, setIsOn] = useState(false);
   const [dtIsOn, setDtIsOn] = useState(false);
+
+  const modes = useMemo(() => supportedModes(state), [state]);
+  const effectList = useMemo(() => {
+    const list = state?.attributes.effect_list;
+    return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : [];
+  }, [state]);
+
+  const minKelvin = clamp(toNumber(state?.attributes.min_color_temp_kelvin) ?? DEFAULT_MIN_KELVIN, 1000, 10000);
+  const maxKelvin = clamp(toNumber(state?.attributes.max_color_temp_kelvin) ?? DEFAULT_MAX_KELVIN, minKelvin, 12000);
 
   // Sync state when modal opens or state changes
   useEffect(() => {
     if (!state) return;
     setIsOn(state.state === 'on');
     const a = state.attributes;
-    if (a.brightness !== undefined) setBrightness(a.brightness);
-    if (a.color_temp !== undefined) setColorTemp(a.color_temp);
-    if (a.rgb_color) {
-      // Derive hue from current RGB
-      const [r, g, b] = a.rgb_color;
-      const max = Math.max(r, g, b), min = Math.min(r, g, b);
-      const d = max - min;
-      let h = 0;
-      if (d > 0) {
-        if (max === r) h = ((g - b) / d + 6) % 6;
-        else if (max === g) h = (b - r) / d + 2;
-        else h = (r - g) / d + 4;
-        h *= 60;
-      }
-      setHue(Math.round(h));
+    if (a.brightness !== undefined) setBrightness(clamp(a.brightness, 1, 255));
+    const kelvin = toNumber(a.color_temp_kelvin) ?? (a.color_temp !== undefined ? miredToKelvin(a.color_temp) : null);
+    if (kelvin) {
+      const nextKelvin = clamp(kelvin, minKelvin, maxKelvin);
+      setColorTempKelvin(nextKelvin);
+      setWhiteKelvin(nextKelvin);
     }
-  }, [state, entityId]);
+    if (a.hs_color) {
+      setHue(Math.round(a.hs_color[0]));
+      setSaturation(Math.round(a.hs_color[1]));
+    } else if (a.rgb_color) {
+      const next = rgbToHueSat(a.rgb_color);
+      setHue(next.h);
+      setSaturation(next.s);
+    }
+    if (a.white_value !== undefined) setWhiteValue(clamp(a.white_value, 0, 255));
+    if (typeof a.effect === 'string') setEffect(a.effect);
+  }, [state, entityId, minKelvin, maxKelvin]);
 
   useEffect(() => {
     setDtIsOn(doubleTapState?.state === 'on');
@@ -96,7 +148,8 @@ export default function LightModal({
   const handleTemp = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const val = parseInt(e.target.value);
-      setColorTemp(val);
+      setColorTempKelvin(val);
+      setWhiteKelvin(val);
       if (entityId) onColorTemp(entityId, val);
     },
     [entityId, onColorTemp],
@@ -116,9 +169,20 @@ export default function LightModal({
       setHue(h);
       if (!entityId) return;
       const rgb = hslToRgb(h);
-      onColor(entityId, rgb, brightness);
+      onColor(entityId, rgb, brightness, { h, s: saturation });
     },
-    [entityId, brightness, onColor],
+    [entityId, brightness, saturation, onColor],
+  );
+
+  const handleSaturation = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const next = parseInt(e.target.value);
+      setSaturation(next);
+      if (!entityId) return;
+      const rgb = hslToRgb(hue);
+      onColor(entityId, rgb, brightness, { h: hue, s: next });
+    },
+    [entityId, hue, brightness, onColor],
   );
 
   const handleWhiteKelvin = useCallback(
@@ -126,20 +190,32 @@ export default function LightModal({
       const k = parseInt(e.target.value);
       setWhiteKelvin(k);
       if (!entityId) return;
-      const { r, g, b } = kelvinToRGB(k);
-      onColor(entityId, {
-        r: Math.round(r * 255),
-        g: Math.round(g * 255),
-        b: Math.round(b * 255),
-      }, brightness);
+      onColorTemp(entityId, k);
     },
-    [entityId, brightness, onColor],
+    [entityId, onColorTemp],
   );
 
-  const showBrightness = ['dimmeable', 'warmCold', 'rgb', 'rgbw'].includes(lightType);
-  const showTemp = lightType === 'warmCold';
-  const showColor = lightType === 'rgb' || lightType === 'rgbw';
-  const showWhite = lightType === 'rgbw';
+  const handleEffect = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const next = e.target.value;
+      setEffect(next);
+      if (entityId && next) onEffect(entityId, next);
+    },
+    [entityId, onEffect],
+  );
+
+  const handleScene = useCallback(
+    (sceneId: string) => {
+      onActivateScene(sceneId);
+    },
+    [onActivateScene],
+  );
+
+  const showBrightness = ['dimmeable', 'warmCold', 'rgb', 'rgbw'].includes(lightType) || modes.some((m) => m !== 'onoff');
+  const showTemp = lightType === 'warmCold' || modes.includes('color_temp') || state?.attributes.color_temp !== undefined || state?.attributes.color_temp_kelvin !== undefined;
+  const showColor = lightType === 'rgb' || lightType === 'rgbw' || modes.some((m) => ['hs', 'rgb', 'rgbw', 'rgbww', 'xy'].includes(m));
+  const showWhite = lightType === 'rgbw' || modes.some((m) => ['white', 'rgbw', 'rgbww'].includes(m));
+  const showEffects = effectList.length > 0;
 
   return (
     <div
@@ -222,15 +298,15 @@ export default function LightModal({
               <div className="slider-header">
                 <span className="modal-label">{t('modal.temperature')}</span>
                 <span className="slider-value">
-                  {miredToKelvin(colorTemp)}K
+                  {colorTempKelvin}K
                 </span>
               </div>
               <input
                 type="range"
                 className="modal-slider warmcold"
-                min={153}
-                max={500}
-                value={colorTemp}
+                min={minKelvin}
+                max={maxKelvin}
+                value={colorTempKelvin}
                 onChange={handleTemp}
               />
             </div>
@@ -245,14 +321,28 @@ export default function LightModal({
               </div>
               <div className="modal-slider-wrap">
                 <div className="slider-header">
+                  <span className="modal-label">{t('modal.saturation')}</span>
+                  <span className="slider-value">{saturation}%</span>
+                </div>
+                <input
+                  type="range"
+                  className="modal-slider saturation"
+                  min={0}
+                  max={100}
+                  value={saturation}
+                  onChange={handleSaturation}
+                />
+              </div>
+              <div className="modal-slider-wrap">
+                <div className="slider-header">
                   <span className="modal-label">{t('modal.whiteTone')}</span>
                   <span className="slider-value">{whiteKelvin}K</span>
                 </div>
                 <input
                   type="range"
                   className="modal-slider warmcold"
-                  min={2000}
-                  max={6500}
+                  min={minKelvin}
+                  max={maxKelvin}
                   value={whiteKelvin}
                   onChange={handleWhiteKelvin}
                 />
@@ -280,6 +370,37 @@ export default function LightModal({
                 value={whiteValue}
                 onChange={handleWhite}
               />
+            </div>
+          )}
+
+          {showEffects && (
+            <div className="modal-slider-wrap">
+              <span className="modal-label">{t('modal.effect')}</span>
+              <select className="modal-select" value={effect} onChange={handleEffect}>
+                <option value="">{t('common.none')}</option>
+                {effectList.map((item) => (
+                  <option key={item} value={item}>{item}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {sceneOptions.length > 0 && (
+            <div className="scene-section">
+              <span className="modal-label">{t('modal.scenes')}</span>
+              <div className="scene-chip-grid">
+                {sceneOptions.map((scene) => (
+                  <button
+                    key={scene.entityId}
+                    className="scene-chip"
+                    type="button"
+                    title={`${t('modal.activateScene')}: ${scene.entityId}`}
+                    onClick={() => handleScene(scene.entityId)}
+                  >
+                    {scene.label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>

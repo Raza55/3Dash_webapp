@@ -50,6 +50,72 @@ function randomBlueToRed(): [number, number, number] {
   ];
 }
 
+function hsToRgbTuple(hue: number, saturation: number): [number, number, number] {
+  const h = ((hue % 360) + 360) % 360;
+  const s = Math.max(0, Math.min(100, saturation)) / 100;
+  const c = s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = 0.5 - c / 2;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (h < 60)       { r = c; g = x; b = 0; }
+  else if (h < 120) { r = x; g = c; b = 0; }
+  else if (h < 180) { r = 0; g = c; b = x; }
+  else if (h < 240) { r = 0; g = x; b = c; }
+  else if (h < 300) { r = x; g = 0; b = c; }
+  else              { r = c; g = 0; b = x; }
+  return [
+    Math.round((r + m) * 255),
+    Math.round((g + m) * 255),
+    Math.round((b + m) * 255),
+  ];
+}
+
+function defaultLightAttributes(config: LightConfig): Record<string, unknown> {
+  const base = {
+    friendly_name: config.label || config.entityId,
+    brightness: 0,
+  };
+  if (config.type === 'rgbw') {
+    return {
+      ...base,
+      supported_color_modes: ['rgbw', 'hs', 'color_temp'],
+      min_color_temp_kelvin: 2000,
+      max_color_temp_kelvin: 6500,
+      effect_list: ['none', 'colorloop'],
+    };
+  }
+  if (config.type === 'rgb') {
+    return {
+      ...base,
+      supported_color_modes: ['hs', 'color_temp'],
+      min_color_temp_kelvin: 2000,
+      max_color_temp_kelvin: 6500,
+      effect_list: ['none', 'colorloop'],
+    };
+  }
+  if (config.type === 'warmCold') {
+    return {
+      ...base,
+      supported_color_modes: ['color_temp'],
+      min_color_temp_kelvin: 2000,
+      max_color_temp_kelvin: 6500,
+    };
+  }
+  if (config.type === 'dimmeable') {
+    return { ...base, supported_color_modes: ['brightness'] };
+  }
+  return { ...base, supported_color_modes: ['onoff'] };
+}
+
+const DEMO_SCENES: Array<{ entityId: string; label: string; brightness: number; hs?: [number, number]; kelvin?: number }> = [
+  { entityId: 'scene.demo_relax', label: 'Relax', brightness: 120, kelvin: 2400 },
+  { entityId: 'scene.demo_read', label: 'Read', brightness: 210, kelvin: 3600 },
+  { entityId: 'scene.demo_concentrate', label: 'Concentrate', brightness: 255, kelvin: 5000 },
+  { entityId: 'scene.demo_neon', label: 'Neon', brightness: 190, hs: [285, 88] },
+];
+
 /** Fluctuation config: base value ± range, with optional decimal places. */
 const SENSOR_FLUCTUATION: Record<string, { base: number; range: number; decimals?: number }> = {
   'sensor.temp_hum_sensor_temperature': { base: 21.3, range: 0.4, decimals: 1 },
@@ -87,10 +153,23 @@ export class DemoHAConnection {
     // Store light types and restore persisted states or default to "off"
     for (const lc of lightConfigs) {
       this.lightTypes.set(lc.entityId, lc.type);
-      this.states.set(lc.entityId, persisted[lc.entityId] ?? {
+      const defaults = defaultLightAttributes(lc);
+      const saved = persisted[lc.entityId];
+      this.states.set(lc.entityId, saved ? {
+        ...saved,
+        attributes: { ...defaults, ...saved.attributes },
+      } : {
         entity_id: lc.entityId,
         state: 'off',
-        attributes: { brightness: 0 },
+        attributes: defaults,
+      });
+    }
+
+    for (const scene of DEMO_SCENES) {
+      this.states.set(scene.entityId, {
+        entity_id: scene.entityId,
+        state: 'unknown',
+        attributes: { friendly_name: scene.label },
       });
     }
 
@@ -184,6 +263,29 @@ export class DemoHAConnection {
       return;
     }
 
+    if (domain === 'scene' && service === 'turn_on') {
+      const scene = DEMO_SCENES.find((item) => item.entityId === entityId);
+      if (scene) {
+        for (const [lightId, current] of this.states.entries()) {
+          if (!lightId.startsWith('light.')) continue;
+          const attrs = { ...current.attributes, brightness: scene.brightness };
+          if (scene.hs) {
+            attrs.hs_color = scene.hs;
+            attrs.rgb_color = hsToRgbTuple(scene.hs[0], scene.hs[1]);
+            attrs.color_mode = 'hs';
+          } else if (scene.kelvin) {
+            attrs.color_temp_kelvin = scene.kelvin;
+            attrs.color_mode = 'color_temp';
+          }
+          this.updateState(lightId, 'on', attrs);
+        }
+      }
+      this.updateState(entityId, new Date().toISOString(), {
+        ...(this.states.get(entityId)?.attributes ?? {}),
+      });
+      return;
+    }
+
     // Climate service calls
     if (domain === 'climate') {
       const current = this.states.get(entityId);
@@ -262,9 +364,20 @@ export class DemoHAConnection {
     if (service === 'turn_on') {
       if (data?.brightness !== undefined) attrs.brightness = data.brightness as number;
       if (!attrs.brightness) attrs.brightness = 255;
+      if (data?.hs_color !== undefined) {
+        attrs.hs_color = data.hs_color as [number, number];
+        const [h, s] = attrs.hs_color as [number, number];
+        attrs.rgb_color = hsToRgbTuple(h, s);
+        attrs.color_mode = 'hs';
+      }
       if (data?.rgb_color !== undefined) attrs.rgb_color = data.rgb_color as [number, number, number];
       if (data?.color_temp !== undefined) attrs.color_temp = data.color_temp as number;
+      if (data?.color_temp_kelvin !== undefined) {
+        attrs.color_temp_kelvin = data.color_temp_kelvin as number;
+        attrs.color_mode = 'color_temp';
+      }
       if (data?.white_value !== undefined) attrs.white_value = data.white_value as number;
+      if (data?.effect !== undefined) attrs.effect = data.effect as string;
       this.updateState(entityId, 'on', attrs);
       return;
     }

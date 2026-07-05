@@ -58,13 +58,47 @@ import GuidedTour from '../../components/GuidedTour/GuidedTour';
 import { dashboardTourSteps } from '../../components/GuidedTour/tourSteps';
 import CardPropertiesPanel from '../../components/SidePanel/CardPropertiesPanel';
 import { SIMULATION_CONFIG, SIMULATION_MODEL_URL } from '../../data/simulationData';
-import type { AppConfig, DisplayConfig, LightConfig, RemoteButton, HAState, CardLayout, SidePanelCard } from '../../types';
+import type { AppConfig, DisplayConfig, LightConfig, RemoteButton, HAState, LightSceneOption, CardLayout, SidePanelCard } from '../../types';
 import './Dashboard.css';
 
 const LONG_PRESS_MS = 500;
 const LIGHT_INTENSITY_BASE = 0.8;
 const MIN_ON_LIGHT_FACTOR = 0.08;
 const MIN_ON_BULB_GLOW = 0.22;
+
+function sceneLabelFromState(state: HAState): string {
+  const friendly = state.attributes.friendly_name;
+  if (friendly) return friendly;
+  return state.entity_id.replace(/^scene\./, '').replace(/_/g, ' ');
+}
+
+function buildSceneOptions(states: Iterable<HAState>): LightSceneOption[] {
+  return Array.from(states)
+    .filter((state) => state.entity_id.startsWith('scene.'))
+    .map((state) => ({
+      entityId: state.entity_id,
+      label: sceneLabelFromState(state),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function hsToColor3(hue: number, saturation: number): Color3 {
+  const h = ((hue % 360) + 360) % 360;
+  const s = Math.max(0, Math.min(100, saturation)) / 100;
+  const c = s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = 0.5 - c / 2;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (h < 60)       { r = c; g = x; b = 0; }
+  else if (h < 120) { r = x; g = c; b = 0; }
+  else if (h < 180) { r = 0; g = c; b = x; }
+  else if (h < 240) { r = 0; g = x; b = c; }
+  else if (h < 300) { r = x; g = 0; b = c; }
+  else              { r = c; g = 0; b = x; }
+  return new Color3(r + m, g + m, b + m);
+}
 
 export default function Dashboard() {
   const { demoMode } = useDemoMode();
@@ -107,6 +141,7 @@ export default function Dashboard() {
   const [modalState, setModalState] = useState<HAState | null>(null);
   const [modalDoubleTapEntityId, setModalDoubleTapEntityId] = useState<string | undefined>();
   const [modalDoubleTapState, setModalDoubleTapState] = useState<HAState | null>(null);
+  const [lightSceneOptions, setLightSceneOptions] = useState<LightSceneOption[]>([]);
 
   const [remoteModalVisible, setRemoteModalVisible] = useState(false);
   const [remoteModalEntityId, setRemoteModalEntityId] = useState<string | null>(null);
@@ -585,7 +620,7 @@ export default function Dashboard() {
         ? (lightBrightness * LIGHT_INTENSITY_BASE * multiplier) / allLights.length
         : lightBrightness * LIGHT_INTENSITY_BASE * multiplier;
 
-      // Determine color: remote mode > HA rgb_color > HA color_temp > config warmth > default warm white
+      // Determine color: remote mode > HA color > HA color_temp > config warmth > default warm white
       let col = new Color3(1, 0.9, 0.7);
 
       // For remote lights, check the mode sensor for current color
@@ -608,6 +643,11 @@ export default function Dashboard() {
         if (attrs.rgb_color) {
           const [r, g, b] = attrs.rgb_color;
           col = new Color3(r / 255, g / 255, b / 255);
+        } else if (attrs.hs_color) {
+          col = hsToColor3(attrs.hs_color[0], attrs.hs_color[1]);
+        } else if (attrs.color_temp_kelvin) {
+          const rgb = kelvinToRGB(attrs.color_temp_kelvin);
+          col = new Color3(rgb.r, rgb.g, rgb.b);
         } else if (attrs.color_temp) {
           const rgb = kelvinToRGB(miredToKelvin(attrs.color_temp));
           col = new Color3(rgb.r, rgb.g, rgb.b);
@@ -1170,6 +1210,10 @@ export default function Dashboard() {
       onStatusChanged: (status: HAConnectionStatus) => setHaStatus(status),
       onStateChanged: (entityId: string, state: HAState) => {
         stopPendingFeedback(entityId);
+        lastStatesRef.current[entityId] = state;
+        if (entityId.startsWith('scene.')) {
+          setLightSceneOptions(buildSceneOptions(Object.values(lastStatesRef.current)));
+        }
         if (meshMapRef.current[entityId]) applyLightState(entityId, state);
         if (blindMeshMapRef.current[entityId]) updateBlindState(blindMeshMapRef.current[entityId], state);
         if (entityId === modalEntityIdRef.current) setModalState(state);
@@ -1179,7 +1223,6 @@ export default function Dashboard() {
 
         // Mode sensor changed → re-apply color to the associated remote light
         if (modeSensorToLight[entityId]) {
-          lastStatesRef.current[entityId] = state;
           const lightId = modeSensorToLight[entityId];
           applyRemoteMode(lightId, state.state);
         }
@@ -1188,7 +1231,6 @@ export default function Dashboard() {
           setCardStates(prev => ({ ...prev, [entityId]: state }));
         }
 
-        lastStatesRef.current[entityId] = state;
         // Update tube labels referencing this sensor.
         for (const tubeId of tubeIdsBySensorRef.current.get(entityId) ?? []) {
           const entry = tubeMapRef.current[tubeId];
@@ -1214,6 +1256,7 @@ export default function Dashboard() {
             .map(s => ({ entity_id: s.entity_id, friendly_name: s.attributes.friendly_name as string | undefined }))
             .sort((a, b) => a.entity_id.localeCompare(b.entity_id)),
         );
+        setLightSceneOptions(buildSceneOptions(states));
         const newCardStates: Record<string, HAState> = {};
         states.forEach((state) => {
           lastStatesRef.current[state.entity_id] = state;
@@ -1456,18 +1499,18 @@ export default function Dashboard() {
     ha.callService('light', 'turn_on', entityId, { brightness });
   }, []);
 
-  const handleColorTemp = useCallback((entityId: string, colorTemp: number) => {
+  const handleColorTemp = useCallback((entityId: string, colorTempKelvin: number) => {
     const ha = haRef.current;
     if (!ha?.isConnected) return;
-    ha.callService('light', 'turn_on', entityId, { color_temp: colorTemp });
+    ha.callService('light', 'turn_on', entityId, { color_temp_kelvin: colorTempKelvin });
   }, []);
 
   const handleColor = useCallback(
-    (entityId: string, color: { r: number; g: number; b: number }, brightness: number) => {
+    (entityId: string, color: { r: number; g: number; b: number }, brightness: number, hsColor?: { h: number; s: number }) => {
       const ha = haRef.current;
       if (!ha?.isConnected) return;
       ha.callService('light', 'turn_on', entityId, {
-        rgb_color: [color.r, color.g, color.b],
+        ...(hsColor ? { hs_color: [hsColor.h, hsColor.s] } : { rgb_color: [color.r, color.g, color.b] }),
         brightness,
       });
     },
@@ -1478,6 +1521,18 @@ export default function Dashboard() {
     const ha = haRef.current;
     if (!ha?.isConnected) return;
     ha.callService('light', 'turn_on', entityId, { white_value: white });
+  }, []);
+
+  const handleEffect = useCallback((entityId: string, effect: string) => {
+    const ha = haRef.current;
+    if (!ha?.isConnected) return;
+    ha.callService('light', 'turn_on', entityId, { effect });
+  }, []);
+
+  const handleActivateScene = useCallback((entityId: string) => {
+    const ha = haRef.current;
+    if (!ha?.isConnected) return;
+    ha.callService('scene', 'turn_on', entityId);
   }, []);
 
   const handleRebuildLights = useCallback((stripConfig: StripConfig, singleRange: number) => {
@@ -1931,6 +1986,9 @@ export default function Dashboard() {
           onColorTemp={handleColorTemp}
           onColor={handleColor}
           onWhiteChannel={handleWhiteChannel}
+          onEffect={handleEffect}
+          onActivateScene={handleActivateScene}
+          sceneOptions={lightSceneOptions}
           doubleTapEntityId={modalDoubleTapEntityId}
           doubleTapState={modalDoubleTapState}
         />
