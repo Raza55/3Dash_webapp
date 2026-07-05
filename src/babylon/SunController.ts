@@ -24,16 +24,20 @@ function toSolarTime(clockMinutes: number, longitude: number, dayOfYear: number)
   return clockMinutes + longitudeCorrection + eot;
 }
 
-export function updateSunPosition(
-  sun: DirectionalLight,
-  hemi: HemisphericLight,
+export interface SunPosition {
+  altitude: number;
+  azimuth: number;
+  altitudeDeg: number;
+  azimuthDeg: number;
+  isDay: boolean;
+}
+
+export function getSunPosition(
   latitude: number,
   longitude: number,
   minutes?: number,
   northOffset?: number,
-  cloudCoverFactor?: number,
-): void {
-  const ccf = cloudCoverFactor ?? 1;
+): SunPosition {
   const now = new Date();
   const clockMins = minutes !== undefined
     ? minutes
@@ -59,8 +63,30 @@ export function updateSunPosition(
     Math.cos(declination) * Math.cos(hourAngle) * Math.sin(lat),
   );
   const azimuth = rawAzimuth + (northOffset ?? 0) * Math.PI / 180;
+  const altitudeDeg = altitude * 180 / Math.PI;
+  const azimuthDeg = ((azimuth * 180 / Math.PI) % 360 + 360) % 360;
 
-  const isDay = altitude > 0;
+  return {
+    altitude,
+    azimuth,
+    altitudeDeg,
+    azimuthDeg,
+    isDay: altitude > 0,
+  };
+}
+
+export function updateSunPosition(
+  sun: DirectionalLight,
+  hemi: HemisphericLight,
+  latitude: number,
+  longitude: number,
+  minutes?: number,
+  northOffset?: number,
+  cloudCoverFactor?: number,
+): void {
+  const ccf = cloudCoverFactor ?? 1;
+  const { altitude, azimuth, isDay } = getSunPosition(latitude, longitude, minutes, northOffset);
+
   if (isDay) {
     const dir = new Vector3(
       -Math.cos(altitude) * Math.sin(azimuth),
@@ -91,26 +117,7 @@ export function isDaytime(
   longitude: number,
   minutes?: number,
 ): boolean {
-  const now = new Date();
-  const clockMins = minutes !== undefined
-    ? minutes
-    : now.getHours() * 60 + now.getMinutes();
-
-  const lat = latitude * Math.PI / 180;
-  const dayOfYear = Math.floor(
-    (now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400000,
-  );
-  const declination =
-    -23.45 * Math.cos(((360 / 365) * (dayOfYear + 10) * Math.PI) / 180) *
-    (Math.PI / 180);
-  const solarMins = toSolarTime(clockMins, longitude, dayOfYear);
-  const hourAngle = ((solarMins / 60 - 12) * 15 * Math.PI) / 180;
-
-  const altitude = Math.asin(
-    Math.sin(lat) * Math.sin(declination) +
-    Math.cos(lat) * Math.cos(declination) * Math.cos(hourAngle),
-  );
-  return altitude > 0;
+  return getSunPosition(latitude, longitude, minutes).isDay;
 }
 
 export function minutesToLabel(m: number): string {

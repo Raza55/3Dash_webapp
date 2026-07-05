@@ -49,21 +49,43 @@ float detectEdge(vec2 uv, vec2 step, float threshold) {
   vec3 nc = sampleNormal(uv);
   if (dot(nc, nc) < 0.0001) return 0.0;
   nc = normalize(nc);
+  float dc = sampleGbrDepth(uv);
 
   float maxEdge = 0.0;
   vec3 n;
+  float dn;
 
   n = sampleNormal(uv + vec2(0.0, step.y));
-  if (dot(n, n) > 0.0001) maxEdge = max(maxEdge, 1.0 - smoothstep(threshold - 0.15, threshold, dot(nc, normalize(n))));
+  if (dot(n, n) < 0.0001) maxEdge = max(maxEdge, 1.0);
+  else {
+    dn = sampleGbrDepth(uv + vec2(0.0, step.y));
+    maxEdge = max(maxEdge, 1.0 - smoothstep(threshold - 0.15, threshold, dot(nc, normalize(n))));
+    maxEdge = max(maxEdge, smoothstep(0.015, 0.06, abs(dc - dn)));
+  }
 
   n = sampleNormal(uv + vec2(0.0, -step.y));
-  if (dot(n, n) > 0.0001) maxEdge = max(maxEdge, 1.0 - smoothstep(threshold - 0.15, threshold, dot(nc, normalize(n))));
+  if (dot(n, n) < 0.0001) maxEdge = max(maxEdge, 1.0);
+  else {
+    dn = sampleGbrDepth(uv + vec2(0.0, -step.y));
+    maxEdge = max(maxEdge, 1.0 - smoothstep(threshold - 0.15, threshold, dot(nc, normalize(n))));
+    maxEdge = max(maxEdge, smoothstep(0.015, 0.06, abs(dc - dn)));
+  }
 
   n = sampleNormal(uv + vec2(-step.x, 0.0));
-  if (dot(n, n) > 0.0001) maxEdge = max(maxEdge, 1.0 - smoothstep(threshold - 0.15, threshold, dot(nc, normalize(n))));
+  if (dot(n, n) < 0.0001) maxEdge = max(maxEdge, 1.0);
+  else {
+    dn = sampleGbrDepth(uv + vec2(-step.x, 0.0));
+    maxEdge = max(maxEdge, 1.0 - smoothstep(threshold - 0.15, threshold, dot(nc, normalize(n))));
+    maxEdge = max(maxEdge, smoothstep(0.015, 0.06, abs(dc - dn)));
+  }
 
   n = sampleNormal(uv + vec2(step.x, 0.0));
-  if (dot(n, n) > 0.0001) maxEdge = max(maxEdge, 1.0 - smoothstep(threshold - 0.15, threshold, dot(nc, normalize(n))));
+  if (dot(n, n) < 0.0001) maxEdge = max(maxEdge, 1.0);
+  else {
+    dn = sampleGbrDepth(uv + vec2(step.x, 0.0));
+    maxEdge = max(maxEdge, 1.0 - smoothstep(threshold - 0.15, threshold, dot(nc, normalize(n))));
+    maxEdge = max(maxEdge, smoothstep(0.015, 0.06, abs(dc - dn)));
+  }
 
   return maxEdge;
 }
@@ -118,6 +140,7 @@ export interface EdgeOutlineControls {
   postProcess: PostProcess;
   /** Enable or disable the post-process edge detection. */
   setEnabled: (enabled: boolean) => void;
+  dispose: () => void;
 }
 
 /**
@@ -178,14 +201,23 @@ export function createEdgeOutline(
     effect.setTexture('sceneDepthSampler', depthRenderer.getDepthMap());
   };
 
+  let enabled = true;
+
   return {
     postProcess,
-    setEnabled(enabled: boolean) {
-      if (enabled) {
+    setEnabled(nextEnabled: boolean) {
+      if (enabled === nextEnabled) return;
+      enabled = nextEnabled;
+      if (nextEnabled) {
         camera.attachPostProcess(postProcess);
       } else {
         camera.detachPostProcess(postProcess);
       }
+    },
+    dispose() {
+      if (enabled) camera.detachPostProcess(postProcess);
+      postProcess.dispose(camera);
+      depthRenderer.dispose();
     },
   };
 }

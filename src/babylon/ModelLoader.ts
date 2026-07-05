@@ -7,11 +7,20 @@ import {
   MeshBuilder,
   StandardMaterial,
   AbstractMesh,
+  Tools,
+  type Node,
   type Mesh,
   type ISceneLoaderProgressEvent,
 } from '@babylonjs/core';
 import '@babylonjs/loaders/glTF';
+import type { ModelObjectOverride, ModelObjectTransform } from '../types';
+import { normalizeModelScale } from './SceneScale';
 
+export interface ModelObjectInfo {
+  id: string;
+  label: string;
+  mesh: AbstractMesh;
+}
 
 export interface ModelLoadResult {
   meshes: AbstractMesh[];
@@ -20,6 +29,10 @@ export interface ModelLoadResult {
   diagonal: number;
   /** Model bounding-box size (max − min) in world units. */
   size: Vector3;
+  /** Imported solid model meshes that can be selected in the editor. */
+  editableObjects: ModelObjectInfo[];
+  /** User scale applied on top of any automatic unit conversion. */
+  modelScale: number;
 }
 
 export interface LoadModelOptions {
@@ -29,6 +42,12 @@ export interface LoadModelOptions {
   sketchColor?: string;
   /** Specular intensity (0..1) of the cartoon material; applied as uniform grayscale. */
   sketchSpecular?: number;
+  /** Enable Babylon's per-mesh edge renderer for classic sketch outlines. */
+  edgeRendering?: boolean;
+  /** User model scale applied after automatic unit conversion. */
+  modelScale?: number;
+  /** Local transform overrides for imported model sub-objects. */
+  objectOverrides?: ModelObjectOverride[];
 }
 
 function hexToColor3(hex: string): Color3 {
@@ -75,50 +94,41 @@ export async function loadModel(
   );
   console.log(`[ModelLoader] loaded in ${(performance.now() - t0).toFixed(0)}ms`);
 
-  // Calculate bounding box and collect solid meshes
-  let min = new Vector3(Infinity, Infinity, Infinity);
-  let max = new Vector3(-Infinity, -Infinity, -Infinity);
+  // Collect solid meshes first; bounds are computed after overrides and scaling.
   const solidMeshes: AbstractMesh[] = [];
 
   result.meshes.forEach((m) => {
     if (!(m instanceof AbstractMesh)) return;
     if (!m.getTotalVertices || m.getTotalVertices() === 0) return;
-    try {
-      const b = m.getBoundingInfo().boundingBox;
-      min = Vector3.Minimize(min, b.minimumWorld);
-      max = Vector3.Maximize(max, b.maximumWorld);
-    } catch {
-      return;
-    }
     m.receiveShadows = true;
     solidMeshes.push(m);
   });
 
-  let center = Vector3.Lerp(min, max, 0.5);
-  let diagonal = Vector3.Distance(min, max);
+  const editableObjects = prepareModelObjects(solidMeshes, options?.objectOverrides ?? []);
+  let bounds = computeModelBounds(solidMeshes);
+  let center = bounds.center;
+  let diagonal = bounds.diagonal;
 
-  // Auto-scale: if model is in millimeters (diagonal > 100), convert to meters
-  if (diagonal > 100) {
-    const scaleFactor = 0.001;
+  // Auto-scale: if model is in millimeters (diagonal > 100), convert to meters.
+  // User scale is applied on top of that normalized coordinate system.
+  const autoScale = diagonal > 100 ? 0.001 : 1;
+  const modelScale = normalizeModelScale(options?.modelScale);
+  const combinedScale = autoScale * modelScale;
 
+  if (combinedScale !== 1) {
     const rootMesh = result.meshes[0];
-    rootMesh.scaling.scaleInPlace(scaleFactor);
+    rootMesh.scaling.scaleInPlace(combinedScale);
 
     // Force world matrix recalculation on all meshes
     scene.meshes.forEach((m) => m.computeWorldMatrix(true));
 
     // Recompute bounding box with new world positions
-    min = new Vector3(Infinity, Infinity, Infinity);
-    max = new Vector3(-Infinity, -Infinity, -Infinity);
     for (const m of solidMeshes) {
       m.refreshBoundingInfo({});
-      const b = m.getBoundingInfo().boundingBox;
-      min = Vector3.Minimize(min, b.minimumWorld);
-      max = Vector3.Maximize(max, b.maximumWorld);
     }
-    center = Vector3.Lerp(min, max, 0.5);
-    diagonal = Vector3.Distance(min, max);
-
+    bounds = computeModelBounds(solidMeshes);
+    center = bounds.center;
+    diagonal = bounds.diagonal;
   }
 
   // Disable lights imported from the model (e.g. UE lights)
@@ -131,12 +141,159 @@ export async function loadModel(
     showTextures: options?.showTextures ?? false,
     sketchColor: options?.sketchColor ?? '#ffffff',
     sketchSpecular: options?.sketchSpecular ?? 0.1,
+    edgeRendering: options?.edgeRendering ?? true,
   });
 
   const shadowCasters: AbstractMesh[] = [...solidMeshes];
 
-  const size = max.subtract(min);
-  return { meshes: result.meshes, shadowCasters, center, diagonal, size };
+  return { meshes: result.meshes, shadowCasters, center, diagonal, size: bounds.size, editableObjects, modelScale };
+}
+
+function computeModelBounds(meshes: AbstractMesh[]): { min: Vector3; max: Vector3; center: Vector3; diagonal: number; size: Vector3 } {
+  let min = new Vector3(Infinity, Infinity, Infinity);
+  let max = new Vector3(-Infinity, -Infinity, -Infinity);
+
+  for (const mesh of meshes) {
+    try {
+      const b = mesh.getBoundingInfo().boundingBox;
+      min = Vector3.Minimize(min, b.minimumWorld);
+      max = Vector3.Maximize(max, b.maximumWorld);
+    } catch {
+      // Some imported helper meshes can fail bounds refresh; skip them.
+    }
+  }
+
+  if (!Number.isFinite(min.x) || !Number.isFinite(max.x)) {
+    min = Vector3.Zero();
+    max = Vector3.Zero();
+  }
+
+  return {
+    min,
+    max,
+    center: Vector3.Lerp(min, max, 0.5),
+    diagonal: Vector3.Distance(min, max),
+    size: max.subtract(min),
+  };
+}
+
+function prepareModelObjects(meshes: AbstractMesh[], overrides: ModelObjectOverride[]): ModelObjectInfo[] {
+  const overridesById = new Map(overrides.map((override) => [override.id, override]));
+  const usedIds = new Map<string, number>();
+
+  return meshes.map((mesh) => {
+    const id = buildStableModelObjectId(mesh, usedIds);
+    const label = buildModelObjectLabel(mesh, id);
+    const metadata = ensureMetadata(mesh);
+
+    metadata.modelObjectId = id;
+    metadata.modelObjectLabel = label;
+    metadata.modelObjectOriginalTransform = readModelObjectTransform(mesh);
+
+    const override = overridesById.get(id);
+    if (override) applyModelObjectTransform(mesh, override);
+
+    return { id, label, mesh };
+  });
+}
+
+function buildStableModelObjectId(mesh: AbstractMesh, usedIds: Map<string, number>): string {
+  const parts: string[] = [];
+  let node: Node | null = mesh;
+
+  while (node) {
+    const name = sanitizeName(readNodeName(node));
+    if (name && name !== '__root__') parts.push(name);
+    node = node.parent;
+  }
+
+  const base = parts.reverse().join('/') || sanitizeName(mesh.name || mesh.id) || 'mesh';
+  const count = (usedIds.get(base) ?? 0) + 1;
+  usedIds.set(base, count);
+  return count === 1 ? base : `${base}#${count}`;
+}
+
+function buildModelObjectLabel(mesh: AbstractMesh, id: string): string {
+  const directName = sanitizeName(mesh.name || mesh.id);
+  if (directName && directName !== '__root__') return directName;
+  return id.split('/').pop() ?? id;
+}
+
+function readNodeName(node: Node): string {
+  const candidate = node as { name?: string; id?: string };
+  return candidate.name || candidate.id || '';
+}
+
+function sanitizeName(name: string): string {
+  return name.trim().replace(/\s+/g, ' ');
+}
+
+function ensureMetadata(mesh: AbstractMesh): Record<string, unknown> {
+  if (!mesh.metadata) mesh.metadata = {};
+  return mesh.metadata as Record<string, unknown>;
+}
+
+export function readModelObjectTransform(mesh: AbstractMesh): ModelObjectTransform {
+  ensureEulerRotation(mesh);
+  return {
+    position: vectorToPlain(mesh.position),
+    rotation: {
+      x: round(toDegrees(mesh.rotation.x)),
+      y: round(toDegrees(mesh.rotation.y)),
+      z: round(toDegrees(mesh.rotation.z)),
+    },
+    scale: vectorToPlain(mesh.scaling),
+  };
+}
+
+export function getOriginalModelObjectTransform(mesh: AbstractMesh): ModelObjectTransform | null {
+  const transform = (mesh.metadata as Record<string, unknown> | null)?.modelObjectOriginalTransform;
+  return transform && typeof transform === 'object' ? structuredClone(transform as ModelObjectTransform) : null;
+}
+
+export function applyModelObjectTransform(mesh: AbstractMesh, transform: ModelObjectTransform): void {
+  if (transform.position) {
+    mesh.position.set(transform.position.x, transform.position.y, transform.position.z);
+  }
+  if (transform.rotation) {
+    ensureEulerRotation(mesh);
+    mesh.rotation.set(
+      toRadians(transform.rotation.x),
+      toRadians(transform.rotation.y),
+      toRadians(transform.rotation.z),
+    );
+  }
+  if (transform.scale) {
+    mesh.scaling.set(
+      Math.max(0.001, transform.scale.x),
+      Math.max(0.001, transform.scale.y),
+      Math.max(0.001, transform.scale.z),
+    );
+  }
+  mesh.computeWorldMatrix(true);
+  mesh.refreshBoundingInfo({});
+}
+
+function ensureEulerRotation(mesh: AbstractMesh): void {
+  if (!mesh.rotationQuaternion) return;
+  mesh.rotation = mesh.rotationQuaternion.toEulerAngles();
+  mesh.rotationQuaternion = null;
+}
+
+function vectorToPlain(v: Vector3) {
+  return { x: round(v.x), y: round(v.y), z: round(v.z) };
+}
+
+function round(value: number): number {
+  return parseFloat(value.toFixed(4));
+}
+
+function toDegrees(radians: number): number {
+  return radians * 180 / Math.PI;
+}
+
+function toRadians(degrees: number): number {
+  return degrees * Math.PI / 180;
 }
 
 const CARTOON_MAT_NAME = 'cartoon_white';
@@ -169,6 +326,7 @@ interface RenderStyleOptions {
   showTextures: boolean;
   sketchColor: string;
   sketchSpecular: number;
+  edgeRendering: boolean;
 }
 
 /**
@@ -190,12 +348,15 @@ function applyRenderStyle(scene: Scene, meshes: AbstractMesh[], opts: RenderStyl
       const orig = mesh.metadata.originalMaterial;
       if (orig) mesh.material = orig;
       mesh.disableEdgesRendering();
-    } else {
+    } else if (opts.edgeRendering) {
       mesh.material = cartoonMat;
-      // Per-mesh edges for outer corners (inner corners handled by EdgeOutline post-process)
+      // Per-mesh edges for classic outer corners.
       mesh.enableEdgesRendering();
       mesh.edgesWidth = 3;
       mesh.edgesColor = new Color4(0, 0, 0, 1);
+    } else {
+      mesh.material = cartoonMat;
+      mesh.disableEdgesRendering();
     }
   }
 }
@@ -209,6 +370,7 @@ export function setTexturesEnabled(
   meshes: AbstractMesh[],
   enabled: boolean,
   edgeWidth: number,
+  edgeRendering = true,
 ): void {
   const whiteMat = getOrCreateCartoonMaterial(scene);
   for (const mesh of meshes) {
@@ -216,11 +378,14 @@ export function setTexturesEnabled(
       const orig = mesh.metadata?.originalMaterial;
       if (orig) mesh.material = orig;
       mesh.disableEdgesRendering();
-    } else {
+    } else if (edgeRendering) {
       mesh.material = whiteMat;
       mesh.enableEdgesRendering();
       mesh.edgesWidth = edgeWidth;
       mesh.edgesColor = new Color4(0, 0, 0, 1);
+    } else {
+      mesh.material = whiteMat;
+      mesh.disableEdgesRendering();
     }
   }
 }
@@ -231,7 +396,12 @@ export function setTexturesEnabled(
  */
 export function createShadowWalls(
   scene: Scene,
-  walls: Array<{ position: { x: number; y: number; z: number }; size: { width: number; height: number; depth: number } }>,
+  walls: Array<{
+    position: { x: number; y: number; z: number };
+    size: { width: number; height: number; depth: number };
+    rotation?: { x: number; y: number; z: number };
+  }>,
+  parent?: Node,
 ): Mesh[] {
   const mat = new StandardMaterial('shadow_wall_mat', scene);
   mat.disableLighting = true;
@@ -243,11 +413,19 @@ export function createShadowWalls(
       depth: w.size.depth,
     }, scene);
     mesh.position = new Vector3(w.position.x, w.position.y, w.position.z);
+    if (w.rotation) {
+      mesh.rotation.set(
+        Tools.ToRadians(w.rotation.x),
+        Tools.ToRadians(w.rotation.y),
+        Tools.ToRadians(w.rotation.z),
+      );
+    }
     mesh.isPickable = false;
     mesh.receiveShadows = false;
     // Hidden from camera but visible to shadow generator
     mesh.layerMask = 0x10000000;
     mesh.material = mat;
+    if (parent) mesh.parent = parent;
     return mesh;
   });
 }

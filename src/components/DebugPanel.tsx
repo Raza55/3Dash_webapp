@@ -13,6 +13,7 @@ import type { StripConfig } from '../babylon/LightMeshFactory';
 import type { WeatherEffectsContext } from '../babylon/WeatherEffects';
 import type { WeatherData } from '../services/weatherApi';
 import { isRaining, isSnowing } from '../services/weatherApi';
+import { useTranslation } from '../contexts/LanguageContext';
 import './DebugPanel.css';
 
 interface Props {
@@ -92,6 +93,7 @@ export default function DebugPanel({
   open, onClose, sceneCtxRef, meshMapRef, shadowCastersRef, onRebuildLights,
   weatherRef, onCloudCoverFactorChange, currentWeather,
 }: Props) {
+  const t = useTranslation();
   /* --- Sun shadow state --- */
   const [sunIntensity, setSunIntensity] = useState(0.6);
   const [sunBias, setSunBias] = useState(0.005);
@@ -399,61 +401,61 @@ export default function DebugPanel({
   return (
     <div className={`debug-panel${open ? ' open' : ''}`}>
       <div className="debug-panel-header">
-        <span className="title">Render Settings</span>
+        <span className="title">{t('debug.renderSettings')}</span>
         <button className="debug-panel-close" onClick={onClose}>&times;</button>
       </div>
 
       <div className="debug-panel-body">
-        <Section title="Sun Light" defaultOpen>
-          <Slider label="Intensity" value={sunIntensity} min={0} max={2} step={0.01} onChange={handleSunIntensity} />
-          <Slider label="Shadow Bias" value={sunBias} min={0} max={0.05} step={0.001} onChange={handleSunBias} />
-          <Slider label="Shadow Normal Bias" value={sunNormalBias} min={0} max={0.1} step={0.001} onChange={handleSunNormalBias} />
-          <Slider label="Blur Kernel" value={sunBlurKernel} min={1} max={64} step={1} onChange={handleSunBlurKernel} />
-          <Slider label="Depth Scale" value={sunDepthScale} min={0} max={200} step={1} onChange={handleSunDepthScale} />
+        <Section title={t('debug.sunLight')} defaultOpen>
+          <Slider label={t('debug.intensity')} value={sunIntensity} min={0} max={2} step={0.01} onChange={handleSunIntensity} />
+          <Slider label={t('debug.shadowBias')} value={sunBias} min={0} max={0.05} step={0.001} onChange={handleSunBias} />
+          <Slider label={t('debug.shadowNormalBias')} value={sunNormalBias} min={0} max={0.1} step={0.001} onChange={handleSunNormalBias} />
+          <Slider label={t('debug.blurKernel')} value={sunBlurKernel} min={1} max={64} step={1} onChange={handleSunBlurKernel} />
+          <Slider label={t('debug.depthScale')} value={sunDepthScale} min={0} max={200} step={1} onChange={handleSunDepthScale} />
         </Section>
 
-        <Section title="Ambient Light" defaultOpen>
-          <Slider label="Intensity" value={hemiIntensity} min={0} max={2} step={0.01} onChange={handleHemiIntensity} />
+        <Section title={t('debug.ambientLight')} defaultOpen>
+          <Slider label={t('debug.intensity')} value={hemiIntensity} min={0} max={2} step={0.01} onChange={handleHemiIntensity} />
         </Section>
 
-        <Section title="Point Lights" defaultOpen>
-          <Slider label="Range (single)" value={plRange} min={1} max={30} step={0.5} onChange={handlePlRange} />
-          <Slider label="Shadow Bias" value={plBias} min={0} max={0.05} step={0.001} onChange={handlePlBias} />
-          <Slider label="Shadow Normal Bias" value={plNormalBias} min={0} max={0.1} step={0.001} onChange={handlePlNormalBias} />
-          <Toggle label="Force Back Faces Only" value={plForceBackFaces} onChange={handlePlForceBackFaces} />
+        <Section title={t('debug.pointLights')} defaultOpen>
+          <Slider label={t('debug.rangeSingle')} value={plRange} min={1} max={30} step={0.5} onChange={handlePlRange} />
+          <Slider label={t('debug.shadowBias')} value={plBias} min={0} max={0.05} step={0.001} onChange={handlePlBias} />
+          <Slider label={t('debug.shadowNormalBias')} value={plNormalBias} min={0} max={0.1} step={0.001} onChange={handlePlNormalBias} />
+          <Toggle label={t('debug.forceBackFacesOnly')} value={plForceBackFaces} onChange={handlePlForceBackFaces} />
         </Section>
 
-        <Section title="Strip Lights" defaultOpen>
-          <Slider label="Range" value={stripRange} min={1} max={30} step={0.5} onChange={handleStripRange} />
-          <Slider label="Spacing (m)" value={stripSpacing} min={0.1} max={2} step={0.05} onChange={(v) => setStripSpacing(v)} />
-          <Slider label="Max sub-lights" value={stripMaxLights} min={1} max={10} step={1} onChange={(v) => setStripMaxLights(v)} />
+        <Section title={t('debug.stripLights')} defaultOpen>
+          <Slider label={t('debug.range')} value={stripRange} min={1} max={30} step={0.5} onChange={handleStripRange} />
+          <Slider label={t('debug.spacingM')} value={stripSpacing} min={0.1} max={2} step={0.05} onChange={(v) => setStripSpacing(v)} />
+          <Slider label={t('debug.maxSubLights')} value={stripMaxLights} min={1} max={10} step={1} onChange={(v) => setStripMaxLights(v)} />
           <button className="debug-rebuild-btn" onClick={handleRebuild}>
-            Rebuild lights
+            {t('debug.rebuildLights')}
           </button>
         </Section>
 
-        <Section title="Material" defaultOpen>
-          <Toggle label="Back-face Culling" value={backFaceCulling} onChange={handleBackFaceCulling} />
-          <Toggle label="Two-sided Lighting" value={twoSidedLighting} onChange={handleTwoSidedLighting} />
+        <Section title={t('debug.material')} defaultOpen>
+          <Toggle label={t('debug.backFaceCulling')} value={backFaceCulling} onChange={handleBackFaceCulling} />
+          <Toggle label={t('debug.twoSidedLighting')} value={twoSidedLighting} onChange={handleTwoSidedLighting} />
         </Section>
 
-        <Section title="Scene" defaultOpen>
-          <Slider label="Glow Intensity" value={glowIntensity} min={0} max={3} step={0.05} onChange={handleGlowIntensity} />
-          <Toggle label="Invisible Roof" value={roofEnabled} onChange={handleRoofToggle} />
+        <Section title={t('debug.scene')} defaultOpen>
+          <Slider label={t('debug.glowIntensity')} value={glowIntensity} min={0} max={3} step={0.05} onChange={handleGlowIntensity} />
+          <Toggle label={t('debug.invisibleRoof')} value={roofEnabled} onChange={handleRoofToggle} />
         </Section>
 
-        <Section title="Weather" defaultOpen={false}>
-          <Toggle label="Clouds" value={debugClouds} onChange={handleDebugClouds} />
+        <Section title={t('debug.weather')} defaultOpen={false}>
+          <Toggle label={t('debug.clouds')} value={debugClouds} onChange={handleDebugClouds} />
           {debugClouds && (
-            <Slider label="Cloud Cover %" value={debugCloudCover} min={0} max={100} step={5} onChange={handleDebugCloudCover} />
+            <Slider label={t('debug.cloudCover')} value={debugCloudCover} min={0} max={100} step={5} onChange={handleDebugCloudCover} />
           )}
-          <Toggle label="Rain" value={debugRain} onChange={handleDebugRain} />
+          <Toggle label={t('debug.rain')} value={debugRain} onChange={handleDebugRain} />
           {debugRain && (
-            <Slider label="Rain mm/h" value={debugRainIntensity} min={0.5} max={10} step={0.5} onChange={handleDebugRainIntensity} />
+            <Slider label={t('debug.rainMm')} value={debugRainIntensity} min={0.5} max={10} step={0.5} onChange={handleDebugRainIntensity} />
           )}
-          <Toggle label="Snow" value={debugSnow} onChange={handleDebugSnow} />
+          <Toggle label={t('debug.snow')} value={debugSnow} onChange={handleDebugSnow} />
           {debugSnow && (
-            <Slider label="Snow cm/h" value={debugSnowIntensity} min={0.5} max={5} step={0.5} onChange={handleDebugSnowIntensity} />
+            <Slider label={t('debug.snowCm')} value={debugSnowIntensity} min={0.5} max={5} step={0.5} onChange={handleDebugSnowIntensity} />
           )}
         </Section>
       </div>

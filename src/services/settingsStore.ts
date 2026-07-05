@@ -3,6 +3,7 @@ import type { CameraControlsFlags } from '../contexts/CameraControlsContext';
 import { isSimulationActive } from '../contexts/SimulationModeContext';
 
 type ThemeMode = 'dark' | 'light' | 'auto' | 'system';
+export type LanguageCode = 'de-DE' | 'en-GB';
 
 /* ── Section interfaces ── */
 
@@ -60,6 +61,7 @@ export interface ControlsSettings {
 
 export interface MiscSettings {
   panelRatio: number | null;
+  language: LanguageCode;
 }
 
 /* ── Root interface ── */
@@ -78,6 +80,11 @@ export interface AppSettings {
 export type SettingsSection = keyof AppSettings;
 
 const STORAGE_KEY = 'settings';
+
+function getDefaultLanguage(): LanguageCode {
+  if (typeof navigator === 'undefined') return 'de-DE';
+  return navigator.language.toLowerCase().startsWith('de') ? 'de-DE' : 'en-GB';
+}
 
 const DEFAULT_SETTINGS: AppSettings = {
   connection: {
@@ -104,7 +111,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     groundGrid: false,
     perspective: true,
     sunShadowRes: 512,
-    pointShadowRes: 512,
+    pointShadowRes: 256,
     showTextures: false,
     sketchColor: '#ffffff',
     sketchSpecular: 0.1,
@@ -122,6 +129,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   misc: {
     panelRatio: null,
+    language: getDefaultLanguage(),
   },
 };
 

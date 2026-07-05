@@ -5,6 +5,7 @@ import {
   DynamicTexture,
   Vector3,
   Color3 as BABYLON_Color3,
+  type Node,
   type Mesh,
 } from '@babylonjs/core';
 import { createElement } from 'react';
@@ -39,6 +40,8 @@ export type DisplayMeshMap = Record<string, DisplayMeshEntry>;
 const PX_TO_SCENE = 1 / 512;
 const LINE_SPACING = 1.4;
 const H_PADDING = 0.6; // extra width factor (chars are ~0.6× their height)
+const TV_TEXTURE_SIZE = { width: 1024, height: 576 };
+const TV_SCENE_SIZE = { width: 1.9, height: 1.07 };
 
 /**
  * Measure the texture size in pixels needed to fit all sources,
@@ -48,6 +51,15 @@ function measureTextureSize(
   cfg: DisplayConfig,
   mockTexts: string[],
 ): { texW: number; texH: number; sceneW: number; sceneH: number } {
+  if (cfg.kind === 'tv') {
+    return {
+      texW: TV_TEXTURE_SIZE.width,
+      texH: TV_TEXTURE_SIZE.height,
+      sceneW: TV_SCENE_SIZE.width,
+      sceneH: TV_SCENE_SIZE.height,
+    };
+  }
+
   const sources = cfg.sources || [];
   const defaultFontSize = cfg.fontSize ?? 64;
 
@@ -90,6 +102,7 @@ function measureTextureSize(
 export function createDisplayMesh(
   scene: Scene,
   cfg: DisplayConfig,
+  parent?: Node,
 ): DisplayMeshEntry {
   // Pre-measure with placeholder texts to get initial size
   const sources = cfg.sources || [];
@@ -144,6 +157,7 @@ export function createDisplayMesh(
   plane.metadata = { displayId: cfg.id };
   plane.isPickable = false;
   plane.applyFog = false;
+  if (parent) plane.parent = parent;
 
   return { plane, texture, material, config: cfg, lastText: '' };
 }
@@ -198,6 +212,11 @@ export function updateDisplayTexture(
   states: Record<string, HAState>,
 ): void {
   const cfg = entry.config;
+  if (cfg.kind === 'tv') {
+    updateTvDisplayTexture(entry, states);
+    return;
+  }
+
   const sources = cfg.sources || [];
   const defaultFontSize = cfg.fontSize ?? 64;
   const defaultFontWeight = cfg.fontWeight ?? 'bold';
@@ -377,6 +396,96 @@ export function updateDisplayTexture(
   entry.texture.update();
 }
 
+function updateTvDisplayTexture(entry: DisplayMeshEntry, states: Record<string, HAState>): void {
+  const cfg = entry.config;
+  const source = cfg.sources.find((src) => src.entityId.startsWith('media_player.')) ?? cfg.sources[0];
+  const ha = source ? states[source.entityId] : undefined;
+  const state = ha?.state ?? 'unknown';
+  const attrs = ha?.attributes ?? {};
+  const isActive = !['off', 'unavailable', 'unknown'].includes(state);
+  const isPlaying = state === 'playing' || state === 'buffering';
+  const app = String(attrs.app_name ?? attrs.source ?? attrs.media_channel ?? '').trim();
+  const title = String(attrs.media_title ?? attrs.media_series_title ?? (isActive ? cfg.label : 'OFF')).trim();
+  const artist = String(attrs.media_artist ?? attrs.media_album_name ?? '').trim();
+  const volume = typeof attrs.volume_level === 'number' ? attrs.volume_level : undefined;
+  const cacheKey = [
+    state,
+    app,
+    title,
+    artist,
+    volume?.toFixed(2) ?? '',
+    attrs.is_volume_muted ? 'muted' : '',
+  ].join('|');
+  if (cacheKey === entry.lastText) return;
+  entry.lastText = cacheKey;
+
+  const ctx = entry.texture.getContext() as unknown as CanvasRenderingContext2D;
+  const texW = entry.texture.getSize().width;
+  const texH = entry.texture.getSize().height;
+  ctx.clearRect(0, 0, texW, texH);
+
+  const bg = ctx.createLinearGradient(0, 0, texW, texH);
+  if (isActive) {
+    bg.addColorStop(0, isPlaying ? '#0f2747' : '#111827');
+    bg.addColorStop(0.55, '#05070b');
+    bg.addColorStop(1, isPlaying ? '#164e63' : '#111827');
+  } else {
+    bg.addColorStop(0, '#020305');
+    bg.addColorStop(1, '#09090b');
+  }
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, texW, texH);
+
+  if (isActive) {
+    const glow = ctx.createRadialGradient(texW * 0.5, texH * 0.5, 20, texW * 0.5, texH * 0.5, texW * 0.6);
+    glow.addColorStop(0, 'rgba(56, 189, 248, 0.22)');
+    glow.addColorStop(1, 'rgba(56, 189, 248, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, texW, texH);
+  }
+
+  ctx.fillStyle = isActive ? '#e2e8f0' : '#334155';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = isActive ? 'rgba(56, 189, 248, 0.55)' : 'transparent';
+  ctx.shadowBlur = isActive ? 18 : 0;
+
+  ctx.font = '700 56px "DM Mono", monospace';
+  ctx.fillText(isActive ? title.slice(0, 32) : 'OFF', texW / 2, texH * 0.46);
+
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = isActive ? '#7dd3fc' : '#475569';
+  ctx.font = '500 25px "DM Mono", monospace';
+  const line2 = isActive
+    ? [app, artist].filter(Boolean).join('  |  ') || state.toUpperCase()
+    : cfg.label;
+  ctx.fillText(line2.slice(0, 54), texW / 2, texH * 0.58);
+
+  ctx.fillStyle = isPlaying ? '#22c55e' : isActive ? '#38bdf8' : '#1f2937';
+  ctx.font = '600 20px "DM Mono", monospace';
+  ctx.fillText(state.toUpperCase(), texW / 2, texH * 0.22);
+
+  if (volume !== undefined) {
+    const barW = texW * 0.36;
+    const barH = 10;
+    const x = (texW - barW) / 2;
+    const y = texH * 0.75;
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.22)';
+    ctx.fillRect(x, y, barW, barH);
+    ctx.fillStyle = attrs.is_volume_muted ? '#64748b' : '#38bdf8';
+    ctx.fillRect(x, y, barW * Math.max(0, Math.min(1, volume)), barH);
+  }
+
+  entry.material.alpha = cfg.opacity ?? 0.98;
+  entry.material.emissiveColor = isActive
+    ? new BABYLON_Color3(0.35, 0.55, 0.75)
+    : new BABYLON_Color3(0.02, 0.02, 0.025);
+  entry.material.diffuseColor = isActive
+    ? new BABYLON_Color3(0.7, 0.8, 0.9)
+    : new BABYLON_Color3(0.05, 0.05, 0.06);
+  entry.texture.update();
+}
+
 export function removeDisplayMesh(map: DisplayMeshMap, id: string): void {
   const entry = map[id];
   if (!entry) return;
@@ -390,10 +499,11 @@ export function rebuildAllDisplayMeshes(
   scene: Scene,
   map: DisplayMeshMap,
   configs: DisplayConfig[],
+  parent?: Node,
 ): void {
   Object.keys(map).forEach((id) => removeDisplayMesh(map, id));
   for (const cfg of configs) {
-    map[cfg.id] = createDisplayMesh(scene, cfg);
+    map[cfg.id] = createDisplayMesh(scene, cfg, parent);
   }
 }
 
@@ -445,7 +555,17 @@ export function buildMockupStates(configs: DisplayConfig[]): Record<string, HASt
           if (lower.includes(key)) { value = val; break; }
         }
       }
-      states[src.entityId] = { entity_id: src.entityId, state: value, attributes: {} };
+      const attributes = domain === 'media_player'
+        ? {
+            app_name: 'Netflix',
+            media_title: 'Demo Movie',
+            media_artist: 'Living Room TV',
+            source: 'HDMI 1',
+            source_list: ['HDMI 1', 'Netflix', 'YouTube'],
+            volume_level: 0.36,
+          }
+        : {};
+      states[src.entityId] = { entity_id: src.entityId, state: value, attributes };
     }
   }
   return states;

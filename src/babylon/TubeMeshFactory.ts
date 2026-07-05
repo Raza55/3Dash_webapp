@@ -9,6 +9,7 @@ import {
   VertexBuffer,
   type Scene,
   type GlowLayer,
+  type Node,
   type Observer,
 } from '@babylonjs/core';
 import { createElement } from 'react';
@@ -128,8 +129,8 @@ export type TubeMap = Record<string, TubeMeshEntry>;
 const GROUND_Y = -1;
 const MODEL_FLOOR_Y = 0;
 const GROUND_CLEARANCE = 0.1; // 10cm above ground
-const TUBE_TESSELLATION = 24;
-const CORNER_SEGMENTS = 12;
+const TUBE_TESSELLATION = 16;
+const CORNER_SEGMENTS = 8;
 const CORNER_RADIUS = 0.35; // world units — fixed radius for the rounded bend
 
 // --- Value formatting ---
@@ -256,7 +257,7 @@ function hexToColor3(hex: string): Color3 {
 // --- Particle helpers ---
 
 const PARTICLE_MIN_COUNT = 6;
-const PARTICLE_MAX_COUNT = 30;
+const PARTICLE_MAX_COUNT = 24;
 /** Base speed in world-units/s — must be high enough relative to path length (~50 units). */
 const PARTICLE_BASE_SPEED = 4;
 /** Max additional speed from sensor values. */
@@ -349,6 +350,7 @@ export function createTubeMeshes(
   scene: Scene,
   config: TubeConfig,
   glowLayer: GlowLayer | null,
+  parent?: Node,
 ): TubeMeshEntry {
   const tubes: Mesh[] = [];
   const labels: TubeLabelEntry[] = [];
@@ -378,6 +380,7 @@ export function createTubeMeshes(
     tube.isPickable = true;
     tube.metadata = { tubeId: config.id };
     tube.applyFog = false;
+    if (parent) tube.parent = parent;
 
     // Position-based fade: transparent at grid edge, opaque near building
     applyPositionFade(tube, GRID_RADIUS * 0.75, GRID_RADIUS * 0.97);
@@ -434,6 +437,7 @@ export function createTubeMeshes(
     }, scene);
     glowTube.visibility = 0.001; // near-invisible — only serves as glow source
     glowTube.isPickable = false;
+    if (parent) glowTube.parent = parent;
     if (glowLayer) glowLayer.addExcludedMesh(glowTube);
 
     const hl = getTubeHighlightLayer(scene);
@@ -501,6 +505,7 @@ export function createTubeMeshes(
     plane.isPickable = true;
     plane.metadata = { tubeId: config.id };
     plane.applyFog = false;
+    if (parent) plane.parent = parent;
 
     // Exclude label from glow layer
     if (glowLayer) {
@@ -536,6 +541,12 @@ export function createTubeMeshes(
       const spheres: Mesh[] = [];
       const offsets: number[] = [];
       const speedJitter: number[] = [];
+      const pMat = new StandardMaterial(`tubeParticleMat_${config.id}_${lineIndex}`, scene);
+      pMat.emissiveColor = brightColor;
+      pMat.diffuseColor = Color3.Black();
+      pMat.specularColor = Color3.Black();
+      pMat.disableLighting = true;
+      pMat.alpha = 0.9;
 
       // Pre-create MAX particles; hide extras beyond initial active count
       for (let p = 0; p < PARTICLE_MAX_COUNT; p++) {
@@ -544,15 +555,10 @@ export function createTubeMeshes(
           { diameter: sphereRadius * 2, segments: 6 },
           scene,
         );
-        const pMat = new StandardMaterial(`tubeParticleMat_${config.id}_${lineIndex}_${p}`, scene);
-        pMat.emissiveColor = brightColor;
-        pMat.diffuseColor = Color3.Black();
-        pMat.specularColor = Color3.Black();
-        pMat.disableLighting = true;
-        pMat.alpha = 0.9;
         sphere.material = pMat;
         sphere.isPickable = false;
         sphere.applyFog = false;
+        if (parent) sphere.parent = parent;
         if (glowLayer) glowLayer.addExcludedMesh(sphere);
 
         const offset = p / PARTICLE_MIN_COUNT;
@@ -721,47 +727,51 @@ function renderLabel(entry: TubeLabelEntry, value: string, unit: string): void {
   }
 }
 
-export function updateTubeValue(tubeMap: TubeMap, sensorId: string, stateValue: string): void {
+export function updateTubeEntryValue(entry: TubeMeshEntry, sensorId: string, stateValue: string): void {
   const raw = parseFloat(stateValue);
   if (isNaN(raw)) return;
 
-  for (const entry of Object.values(tubeMap)) {
-    for (const label of entry.labels) {
-      if (label.sensorId === sensorId) {
-        if (label.displayUnit) {
-          const { value, unit } = formatGenericValue(raw, label.displayUnit, label.precision);
-          renderLabel(label, value, unit);
-        } else {
-          const bits = raw * UNIT_TO_BITS[label.inputUnit];
-          const { value, unit } = formatSpeed(bits, label.displayBytes, label.precision);
-          renderLabel(label, value, unit);
-        }
+  for (const label of entry.labels) {
+    if (label.sensorId === sensorId) {
+      if (label.displayUnit) {
+        const { value, unit } = formatGenericValue(raw, label.displayUnit, label.precision);
+        renderLabel(label, value, unit);
+      } else {
+        const bits = raw * UNIT_TO_BITS[label.inputUnit];
+        const { value, unit } = formatSpeed(bits, label.displayBytes, label.precision);
+        renderLabel(label, value, unit);
       }
     }
-    // Update particle speed & density for matching sensors
-    for (const pe of entry.particles) {
-      if (pe.sensorId === sensorId) {
-        pe.speed = rawToParticleSpeed(raw, pe.maxSensorValue, pe.speedMultiplier);
-        // Scale active particle count with sensor intensity
-        const t = Math.min(raw / pe.maxSensorValue, 1);
-        const target = Math.round(PARTICLE_MIN_COUNT + t * (PARTICLE_MAX_COUNT - PARTICLE_MIN_COUNT));
-        if (target !== pe.activeCount) {
-          // Show/hide particles to match target count
-          for (let i = 0; i < PARTICLE_MAX_COUNT; i++) {
-            const shouldBeActive = i < target;
-            if (shouldBeActive && !pe.spheres[i].isEnabled()) {
-              // Re-randomize offset & jitter for newly activated particles
-              pe.offsets[i] = Math.random();
-              pe.speedJitter[i] = 0.75 + Math.random() * 0.5;
-              const pos = positionAtDistance(pe.path, pe.distances, pe.offsets[i] * pe.totalLength);
-              pe.spheres[i].position.copyFrom(pos);
-            }
-            pe.spheres[i].setEnabled(shouldBeActive);
+  }
+
+  // Update particle speed & density for matching sensors.
+  for (const pe of entry.particles) {
+    if (pe.sensorId === sensorId) {
+      pe.speed = rawToParticleSpeed(raw, pe.maxSensorValue, pe.speedMultiplier);
+      // Scale active particle count with sensor intensity.
+      const t = Math.min(raw / pe.maxSensorValue, 1);
+      const target = Math.round(PARTICLE_MIN_COUNT + t * (PARTICLE_MAX_COUNT - PARTICLE_MIN_COUNT));
+      if (target !== pe.activeCount) {
+        // Show/hide particles to match target count.
+        for (let i = 0; i < PARTICLE_MAX_COUNT; i++) {
+          const shouldBeActive = i < target;
+          if (shouldBeActive && !pe.spheres[i].isEnabled()) {
+            pe.offsets[i] = Math.random();
+            pe.speedJitter[i] = 0.75 + Math.random() * 0.5;
+            const pos = positionAtDistance(pe.path, pe.distances, pe.offsets[i] * pe.totalLength);
+            pe.spheres[i].position.copyFrom(pos);
           }
-          pe.activeCount = target;
+          pe.spheres[i].setEnabled(shouldBeActive);
         }
+        pe.activeCount = target;
       }
     }
+  }
+}
+
+export function updateTubeValue(tubeMap: TubeMap, sensorId: string, stateValue: string): void {
+  for (const entry of Object.values(tubeMap)) {
+    updateTubeEntryValue(entry, sensorId, stateValue);
   }
 }
 
@@ -812,8 +822,8 @@ export function removeTubeMeshes(tubeMap: TubeMap, tubeId: string): void {
   }
   // Dispose particle spheres
   for (const pe of entry.particles) {
+    pe.spheres[0]?.material?.dispose();
     for (const s of pe.spheres) {
-      s.material?.dispose();
       s.dispose();
     }
   }

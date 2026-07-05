@@ -102,6 +102,8 @@ export function createWeatherEffects(scene: Scene, shadowGen?: ShadowGenerator):
 
   let rainActive = false;
   let snowActive = false;
+  let rainStopTimer: ReturnType<typeof setTimeout> | null = null;
+  let snowStopTimer: ReturnType<typeof setTimeout> | null = null;
 
   function updateWeather(data: WeatherData): number {
     // Adapt snow color to theme — detect from scene background brightness
@@ -122,6 +124,7 @@ export function createWeatherEffects(scene: Scene, shadowGen?: ShadowGenerator):
 
     // --- Rain ---
     if (wantRain && !rainActive) {
+      if (rainStopTimer) { clearTimeout(rainStopTimer); rainStopTimer = null; }
       rain.start();
       rainActive = true;
     }
@@ -130,12 +133,17 @@ export function createWeatherEffects(scene: Scene, shadowGen?: ShadowGenerator):
     }
     if (!wantRain && rainActive) {
       rain.emitRate = 0;
-      setTimeout(() => rain.stop(), 2000);
+      if (rainStopTimer) clearTimeout(rainStopTimer);
+      rainStopTimer = setTimeout(() => {
+        rain.stop();
+        rainStopTimer = null;
+      }, 2000);
       rainActive = false;
     }
 
     // --- Snow ---
     if (wantSnow && !snowActive) {
+      if (snowStopTimer) { clearTimeout(snowStopTimer); snowStopTimer = null; }
       snow.start();
       snowActive = true;
     }
@@ -144,7 +152,11 @@ export function createWeatherEffects(scene: Scene, shadowGen?: ShadowGenerator):
     }
     if (!wantSnow && snowActive) {
       snow.emitRate = 0;
-      setTimeout(() => snow.stop(), 5000);
+      if (snowStopTimer) clearTimeout(snowStopTimer);
+      snowStopTimer = setTimeout(() => {
+        snow.stop();
+        snowStopTimer = null;
+      }, 5000);
       snowActive = false;
     }
 
@@ -160,6 +172,8 @@ export function createWeatherEffects(scene: Scene, shadowGen?: ShadowGenerator):
   }
 
   function dispose() {
+    if (rainStopTimer) clearTimeout(rainStopTimer);
+    if (snowStopTimer) clearTimeout(snowStopTimer);
     rain.dispose();
     snow.dispose();
     rainTex.dispose();

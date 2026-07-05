@@ -1,10 +1,17 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import type { ShadowWallConfig, LightPosition } from '../types';
 import { generateUUID } from '../utils/uuid';
 import { FormPanel, AccordionSection } from './FormPanel';
+import { useTranslation } from '../contexts/LanguageContext';
 
 export interface WallPreviewInfo {
   size: { width: number; height: number; depth: number };
+  rotation?: LightPosition;
+}
+
+export interface ShadowWallFormHandle {
+  updateSize: (size: { width: number; height: number; depth: number }) => void;
+  updateRotation: (rotation: LightPosition) => void;
 }
 
 interface Props {
@@ -20,7 +27,9 @@ interface Props {
   placingMode: boolean;
 }
 
-export default function ShadowWallForm({
+const ZERO_ROTATION: LightPosition = { x: 0, y: 0, z: 0 };
+
+const ShadowWallForm = forwardRef<ShadowWallFormHandle, Props>(function ShadowWallForm({
   open,
   editWall,
   position,
@@ -31,11 +40,28 @@ export default function ShadowWallForm({
   onExitPlacingMode,
   onPreviewChange,
   placingMode,
-}: Props) {
+}: Props, ref) {
+  const t = useTranslation();
   const [label, setLabel] = useState('');
   const [width, setWidth] = useState(5);
   const [height, setHeight] = useState(0.05);
   const [depth, setDepth] = useState(5);
+  const [rotation, setRotation] = useState<LightPosition>(ZERO_ROTATION);
+
+  useImperativeHandle(ref, () => ({
+    updateSize: (size) => {
+      setWidth(parseFloat(Math.max(0.01, size.width).toFixed(3)));
+      setHeight(parseFloat(Math.max(0.01, size.height).toFixed(3)));
+      setDepth(parseFloat(Math.max(0.01, size.depth).toFixed(3)));
+    },
+    updateRotation: (nextRotation) => {
+      setRotation({
+        x: parseFloat(nextRotation.x.toFixed(1)),
+        y: parseFloat(nextRotation.y.toFixed(1)),
+        z: parseFloat(nextRotation.z.toFixed(1)),
+      });
+    },
+  }));
 
   // Init form from editWall
   useEffect(() => {
@@ -45,19 +71,21 @@ export default function ShadowWallForm({
       setWidth(editWall.size.width);
       setHeight(editWall.size.height);
       setDepth(editWall.size.depth);
+      setRotation(editWall.rotation ?? ZERO_ROTATION);
     } else {
       setLabel('');
       setWidth(5);
       setHeight(0.05);
       setDepth(5);
+      setRotation(ZERO_ROTATION);
     }
   }, [open, editWall]);
 
   // Notify parent of preview changes
   useEffect(() => {
     if (!open) return;
-    onPreviewChange({ size: { width, height, depth } });
-  }, [open, width, height, depth]); // eslint-disable-line react-hooks/exhaustive-deps
+    onPreviewChange({ size: { width, height, depth }, rotation });
+  }, [open, width, height, depth, rotation]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handlePosChange = useCallback(
     (axis: 'x' | 'y' | 'z', value: number) => {
@@ -72,9 +100,10 @@ export default function ShadowWallForm({
       label: label || 'Wall',
       position,
       size: { width, height, depth },
+      rotation,
     };
     onSave(cfg);
-  }, [editWall, label, position, width, height, depth, onSave]);
+  }, [editWall, label, position, width, height, depth, rotation, onSave]);
 
   const footer = (
     <>
@@ -82,13 +111,13 @@ export default function ShadowWallForm({
         className="btn btn-primary"
         onClick={placingMode ? onExitPlacingMode : onEnterPlacingMode}
       >
-        {placingMode ? '\u2715 Cancel Placement' : '\u{1F4CD} Click Model to Place'}
+        {placingMode ? `\u2715 ${t('form.cancelPlacement')}` : `\u{1F4CD} ${t('form.clickModelToPlace')}`}
       </button>
       <button className="btn btn-success" onClick={handleSave}>
-        &#10003; Save Wall
+        &#10003; {t('form.saveWall')}
       </button>
       <button className="btn btn-ghost" onClick={onClose}>
-        Cancel
+        {t('common.cancel')}
       </button>
     </>
   );
@@ -96,27 +125,27 @@ export default function ShadowWallForm({
   return (
     <FormPanel
       open={open}
-      title={editWall ? 'Edit Shadow Wall' : 'Add Shadow Wall'}
+      title={editWall ? t('form.editWall') : t('form.addWall')}
       onClose={onClose}
       footer={footer}
     >
-      <AccordionSection title="Label" defaultOpen>
+      <AccordionSection title={t('form.label')} defaultOpen>
         <div className="field-group">
           <input
             type="text"
             className="field-input"
-            placeholder="e.g. Roof, Balcony overhang"
+            placeholder={t('placeholder.wallLabel')}
             value={label}
             onChange={(e) => setLabel(e.target.value)}
           />
         </div>
       </AccordionSection>
 
-      <AccordionSection title="Size" defaultOpen>
+      <AccordionSection title={t('form.size')} defaultOpen>
         {([
-          { label: 'Width', key: 'width' as const, value: width, set: setWidth },
-          { label: 'Height', key: 'height' as const, value: height, set: setHeight },
-          { label: 'Depth', key: 'depth' as const, value: depth, set: setDepth },
+          { label: t('form.width'), key: 'width' as const, value: width, set: setWidth },
+          { label: t('form.height'), key: 'height' as const, value: height, set: setHeight },
+          { label: t('form.depth'), key: 'depth' as const, value: depth, set: setDepth },
         ]).map(({ label: lbl, key, value, set }) => (
           <div key={key} className="pos-grid">
             <span className="pos-axis" style={{ color: 'var(--muted)' }}>{lbl}</span>
@@ -141,10 +170,39 @@ export default function ShadowWallForm({
         ))}
       </AccordionSection>
 
-      <AccordionSection title="Position" defaultOpen>
-        <div className={`placement-hint${open ? ' visible' : ''}`}>
-          Click anywhere on the model to place,<br />then fine-tune below.
-        </div>
+      <AccordionSection title={t('form.rotation')}>
+        {([
+          { label: 'X', axis: 'x' as const },
+          { label: 'Y', axis: 'y' as const },
+          { label: 'Z', axis: 'z' as const },
+        ]).map(({ label: lbl, axis }) => (
+          <div key={axis} className="pos-grid">
+            <span className="pos-axis" style={{ color: 'var(--muted)' }}>{lbl}</span>
+            <input
+              type="range"
+              className="pos-slider"
+              min={-180}
+              max={180}
+              step={1}
+              value={rotation[axis]}
+              onChange={(e) => setRotation({ ...rotation, [axis]: parseFloat(e.target.value) })}
+            />
+            <input
+              type="number"
+              className="pos-num"
+              step={1}
+              value={rotation[axis]}
+              onChange={(e) => setRotation({ ...rotation, [axis]: parseFloat(e.target.value) || 0 })}
+            />
+          </div>
+        ))}
+      </AccordionSection>
+
+      <AccordionSection title={t('form.position')} defaultOpen>
+        <div
+          className={`placement-hint${open ? ' visible' : ''}`}
+          dangerouslySetInnerHTML={{ __html: t('form.placementHintModel') }}
+        />
 
         {([
           { label: 'X', color: '#f87171', babylonAxis: 'x' as const, range: [-30, 30] as [number, number] },
@@ -174,4 +232,6 @@ export default function ShadowWallForm({
       </AccordionSection>
     </FormPanel>
   );
-}
+});
+
+export default ShadowWallForm;

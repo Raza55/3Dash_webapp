@@ -1,13 +1,16 @@
 import { useState } from 'react';
 import { updateConfig } from '../../../services/configApi';
+import { useTranslation } from '../../../contexts/LanguageContext';
+import { SYSTEM_LOCATION } from '../../../constants/location';
 
 interface Props {
   onComplete: () => void;
 }
 
 export default function LocationStep({ onComplete }: Props) {
-  const [latitude, setLatitude] = useState('43.6077');
-  const [longitude, setLongitude] = useState('3.8766');
+  const t = useTranslation();
+  const [latitude, setLatitude] = useState(String(SYSTEM_LOCATION.latitude));
+  const [longitude, setLongitude] = useState(String(SYSTEM_LOCATION.longitude));
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
@@ -30,51 +33,45 @@ export default function LocationStep({ onComplete }: Props) {
   return (
     <div className="onboarding-step">
       <div>
-        <h1>Location</h1>
-        <h2>Set your coordinates for sun simulation</h2>
+        <h1>{t('onboarding.locationTitle')}</h1>
+        <h2>{t('onboarding.locationSubtitle')}</h2>
       </div>
 
-      <p>
-        Your location is used to calculate the sun's position throughout the day,
-        providing realistic lighting in your 3D model.
-      </p>
+      <p>{t('onboarding.locationBody')}</p>
 
       <div className="onboarding-row">
         <div className="onboarding-field">
-          <label className="onboarding-label">Latitude</label>
+          <label className="onboarding-label">{t('settings.latitude')}</label>
           <input
             className="onboarding-input"
             type="number"
             step="0.0001"
             value={latitude}
             onChange={(e) => setLatitude(e.target.value)}
-            placeholder="43.6077"
+            placeholder={String(SYSTEM_LOCATION.latitude)}
           />
         </div>
         <div className="onboarding-field">
-          <label className="onboarding-label">Longitude</label>
+          <label className="onboarding-label">{t('settings.longitude')}</label>
           <input
             className="onboarding-input"
             type="number"
             step="0.0001"
             value={longitude}
             onChange={(e) => setLongitude(e.target.value)}
-            placeholder="3.8766"
+            placeholder={String(SYSTEM_LOCATION.longitude)}
           />
         </div>
       </div>
 
-      <p>
-        You can find your coordinates by searching your address on Google Maps and
-        copying the values from the URL.
-      </p>
+      <p>{t('onboarding.locationHelp')}</p>
 
       <button
         className="onboarding-btn primary"
         onClick={handleSave}
         disabled={saving}
       >
-        {saving ? 'Saving...' : 'Save & Continue'}
+        {saving ? t('onboarding.saving') : t('onboarding.saveContinue')}
       </button>
     </div>
   );

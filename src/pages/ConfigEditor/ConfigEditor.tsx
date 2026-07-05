@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Crosshair, Image as ImageIcon, ImageOff, Move3d, Rotate3d, Scale3d } from 'lucide-react';
 import { generateUUID } from '../../utils/uuid';
 import {
   Vector3,
@@ -12,15 +13,28 @@ import {
   Animation,
   CubicEase,
   EasingFunction,
+  GizmoAnchorPoint,
   Tools,
+  RotationGizmo,
+  ScaleGizmo,
+  Space,
+  type AbstractMesh,
   type Mesh,
   type LinesMesh,
   type Observer,
   type Scene,
+  type TransformNode,
 } from '@babylonjs/core';
-import { createScene, type SceneContext } from '../../babylon/SceneManager';
-import { loadModel } from '../../babylon/ModelLoader';
-import { createEdgeOutline } from '../../babylon/EdgeOutline';
+import { applyCameraControlSensitivity, createScene, type SceneContext } from '../../babylon/SceneManager';
+import { applyModelObjectTransform, getOriginalModelObjectTransform, loadModel, readModelObjectTransform, setTexturesEnabled } from '../../babylon/ModelLoader';
+import {
+  disposeImportedObject,
+  getImportedObjectFormat,
+  isSupportedImportedObjectFormat,
+  loadImportedObject,
+  type ImportedObjectLoadResult,
+} from '../../babylon/ImportedObjectLoader';
+import { createEdgeOutline, type EdgeOutlineControls } from '../../babylon/EdgeOutline';
 import { removeLightMesh, rebuildAllMeshes, type MeshMap } from '../../babylon/LightMeshFactory';
 import {
   createDisplayMesh,
@@ -30,27 +44,123 @@ import {
   buildMockupStates,
   type DisplayMeshMap,
 } from '../../babylon/DisplayMeshFactory';
-import { getConfig, updateConfig, getModelBlob } from '../../services/configApi';
-import { getSetting } from '../../services/settingsStore';
+import {
+  createBlindMesh,
+  removeBlindMesh,
+  rebuildAllBlindMeshes,
+  updateBlindPosition,
+  type BlindMeshMap,
+} from '../../babylon/BlindMeshFactory';
+import { deleteModelObjectAsset, getConfig, getModelBlob, getModelObjectBlob, updateConfig, uploadModelObject } from '../../services/configApi';
+import { getSetting, updateSettings } from '../../services/settingsStore';
 import { getEntityCache, setEntityCache } from '../../services/entityCache';
 import { HAConnection } from '../../services/haWebSocket';
 import type { HAEntityOption } from '../../components/EntityPicker';
 import LightList from '../../components/LightList';
 import LightForm, { type PreviewInfo, type LightFormHandle } from '../../components/LightForm';
 import DisplayList from '../../components/DisplayList';
-import DisplayForm, { type DisplayPreviewInfo } from '../../components/DisplayForm';
+import DisplayForm, { type DisplayFormHandle, type DisplayPreviewInfo } from '../../components/DisplayForm';
+import BlindList from '../../components/BlindList';
+import BlindForm, { type BlindFormHandle, type BlindPreviewInfo } from '../../components/BlindForm';
 import ShadowWallList from '../../components/ShadowWallList';
-import ShadowWallForm, { type WallPreviewInfo } from '../../components/ShadowWallForm';
+import ShadowWallForm, { type ShadowWallFormHandle, type WallPreviewInfo } from '../../components/ShadowWallForm';
 import { arrayMove } from '@dnd-kit/sortable';
 import TubeList from '../../components/TubeList';
 import TubeForm, { type TubePreviewInfo } from '../../components/TubeForm';
+import ModelObjectList, { type ModelObjectEditMode, type ModelObjectListItem } from '../../components/ModelObjectList';
 import { createTubeMeshes, removeTubeMeshes, disposeAllTubes, renderMockupLabels, type TubeMap } from '../../babylon/TubeMeshFactory';
+import { createSceneScaleRoot, getModelScale, worldToConfigPosition } from '../../babylon/SceneScale';
+import { useTranslation } from '../../contexts/LanguageContext';
 import GuidedTour from '../../components/GuidedTour/GuidedTour';
 import { editorTourSteps } from '../../components/GuidedTour/tourSteps';
-import type { LightConfig, LightGroup, DisplayConfig, ShadowWallConfig, TubeConfig, LightPosition, HAState } from '../../types';
+import type { LightConfig, LightGroup, DisplayConfig, BlindConfig, ShadowWallConfig, TubeConfig, LightPosition, HAState, ImportedModelObjectConfig, ModelObjectOverride } from '../../types';
 import './ConfigEditor.css';
 
+type ActiveGizmo = PositionGizmo | RotationGizmo | ScaleGizmo;
+type EditorTransformMode = ModelObjectEditMode;
+
+const TRANSFORM_MODES: EditorTransformMode[] = ['move', 'rotate', 'scale'];
+
+function roundValue(value: number, decimals = 3): number {
+  return parseFloat(value.toFixed(decimals));
+}
+
+function rotationFromMesh(mesh: AbstractMesh): LightPosition {
+  const rotation = mesh.rotationQuaternion?.toEulerAngles() ?? mesh.rotation;
+  return {
+    x: roundValue(Tools.ToDegrees(rotation.x), 1),
+    y: roundValue(Tools.ToDegrees(rotation.y), 1),
+    z: roundValue(Tools.ToDegrees(rotation.z), 1),
+  };
+}
+
+function scaleFromMesh(mesh: AbstractMesh, shape?: string, size?: Record<string, number>): LightPosition {
+  const base = shape === 'ellipsoid'
+    ? {
+        x: Math.max(0.001, size?.width ?? size?.diameter ?? 1),
+        y: Math.max(0.001, size?.height ?? size?.diameter ?? 1),
+        z: Math.max(0.001, size?.depth ?? size?.diameter ?? 1),
+      }
+    : { x: 1, y: 1, z: 1 };
+  return {
+    x: roundValue(Math.max(0.001, mesh.scaling.x / base.x), 3),
+    y: roundValue(Math.max(0.001, mesh.scaling.y / base.y), 3),
+    z: roundValue(Math.max(0.001, mesh.scaling.z / base.z), 3),
+  };
+}
+
+function meshLocalSize(mesh: AbstractMesh): { width: number; height: number; depth: number } {
+  mesh.computeWorldMatrix(true);
+  mesh.refreshBoundingInfo({});
+  const bounds = mesh.getBoundingInfo().boundingBox;
+  return {
+    width: Math.max(0.001, bounds.maximum.x - bounds.minimum.x),
+    height: Math.max(0.001, bounds.maximum.y - bounds.minimum.y),
+    depth: Math.max(0.001, bounds.maximum.z - bounds.minimum.z),
+  };
+}
+
+function displayNormalFromPlane(plane: AbstractMesh): LightPosition {
+  const normal = plane.getDirection(Vector3.Forward()).normalize();
+  return {
+    x: roundValue(normal.x, 4),
+    y: roundValue(normal.y, 4),
+    z: roundValue(normal.z, 4),
+  };
+}
+
+function createGizmoForMode(mode: EditorTransformMode, utilLayer: UtilityLayerRenderer): ActiveGizmo {
+  if (mode === 'rotate') {
+    const gizmo = new RotationGizmo(utilLayer, undefined, true);
+    gizmo.scaleRatio = 1.15;
+    gizmo.sensitivity = 0.85;
+    // Babylon refuses rotation on non-uniformly scaled meshes when the gizmo
+    // tries to mirror the mesh orientation. Ellipsoids and scaled objects need
+    // the ring to stay world-oriented so the rotation still applies.
+    gizmo.updateGizmoRotationToMatchAttachedMesh = false;
+    return gizmo;
+  }
+  if (mode === 'scale') {
+    const gizmo = new ScaleGizmo(utilLayer);
+    gizmo.scaleRatio = 1.1;
+    gizmo.sensitivity = 0.75;
+    return gizmo;
+  }
+  const gizmo = new PositionGizmo(utilLayer);
+  gizmo.scaleRatio = 1.2;
+  return gizmo;
+}
+
+function setUtilityMeshAlpha(utilLayer: UtilityLayerRenderer, alpha = 0.5): void {
+  for (const mesh of utilLayer.utilityLayerScene.meshes) {
+    if (mesh.material) {
+      (mesh.material as StandardMaterial).alpha = alpha;
+    }
+  }
+}
+
 export default function ConfigEditor() {
+  const t = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [showGuidedTour, setShowGuidedTour] = useState(() => searchParams.get('guided') === 'true');
@@ -60,18 +170,29 @@ export default function ConfigEditor() {
   const homeTargetRef = useRef<Vector3 | null>(null);
   const modelSizeRef = useRef<{ x: number; z: number } | null>(null);
   const modelDiagonalRef = useRef(1);
+  const modelMeshesRef = useRef<AbstractMesh[]>([]);
+  const edgeOutlineRef = useRef<EdgeOutlineControls | null>(null);
   const meshMapRef = useRef<MeshMap>({});
+  const entityScaleRootRef = useRef<TransformNode | null>(null);
+  const modelScaleRef = useRef(1);
+  const modelObjectMeshesRef = useRef<Record<string, AbstractMesh>>({});
+  const importedObjectResultsRef = useRef<Record<string, ImportedObjectLoadResult>>({});
+  const modelObjectGizmoRef = useRef<ActiveGizmo | null>(null);
+  const selectedModelObjectMeshRef = useRef<AbstractMesh | null>(null);
   const previewMeshRef = useRef<Mesh | null>(null);
   const extraPreviewMeshesRef = useRef<Mesh[]>([]);
   const hitboxPreviewRef = useRef<Mesh | null>(null);
   const previewObsRef = useRef<Observer<Scene> | null>(null);
-  const gizmoRef = useRef<PositionGizmo | null>(null);
+  const gizmoRef = useRef<ActiveGizmo | null>(null);
   const utilLayerRef = useRef<UtilityLayerRenderer | null>(null);
   const draggingGizmoRef = useRef(false);
   const posUndoStackRef = useRef<LightPosition[]>([]);
   const gizmoTargetRef = useRef<'main' | { type: 'part'; index: number } | { type: 'hitbox' }>('main');
   const skipPreviewRebuildRef = useRef(false);
   const lightFormRef = useRef<LightFormHandle>(null);
+  const displayFormRef = useRef<DisplayFormHandle>(null);
+  const blindFormRef = useRef<BlindFormHandle>(null);
+  const wallFormRef = useRef<ShadowWallFormHandle>(null);
   const tubeAnchorRef = useRef<Mesh | null>(null);
 
   const [haEntities, setHaEntities] = useState<HAEntityOption[]>(() => getEntityCache());
@@ -81,12 +202,23 @@ export default function ConfigEditor() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [placingMode, setPlacingMode] = useState(false);
   const [position, setPosition] = useState<LightPosition>({ x: 0, y: 2.5, z: 0 });
-  const [coordText, setCoordText] = useState('x: \u2014  z: \u2014  y: \u2014');
+  const [coordText, setCoordText] = useState(() => t('editor.coordEmpty'));
   const [toastMsg, setToastMsg] = useState('');
   const [toastVisible, setToastVisible] = useState(false);
+  const [showTextures, setShowTextures] = useState(() => getSetting('render').showTextures);
 
-  // Editor mode: lights, displays, walls, or tubes
-  const [editorMode, setEditorMode] = useState<'lights' | 'displays' | 'walls' | 'tubes'>('lights');
+  // Editor mode: lights, blinds, displays, walls, tubes, or imported model objects
+  const [editorMode, setEditorMode] = useState<'lights' | 'blinds' | 'displays' | 'walls' | 'tubes' | 'modelObjects'>('lights');
+  const editorModeRef = useRef(editorMode);
+  editorModeRef.current = editorMode;
+  const [modelObjects, setModelObjects] = useState<ModelObjectListItem[]>([]);
+  const baseModelObjectsRef = useRef<ModelObjectListItem[]>([]);
+  const [selectedModelObjectId, setSelectedModelObjectId] = useState<string | null>(null);
+  const [transformMode, setTransformMode] = useState<EditorTransformMode>('move');
+  const transformModeRef = useRef<EditorTransformMode>(transformMode);
+  transformModeRef.current = transformMode;
+  const modelObjectOverridesRef = useRef<ModelObjectOverride[]>([]);
+  const importedModelObjectsRef = useRef<ImportedModelObjectConfig[]>([]);
 
   // Load HA entity list for autocomplete in forms (cache-first, else fetch fresh).
   useEffect(() => {
@@ -123,7 +255,20 @@ export default function ConfigEditor() {
   const displayPreviewIdRef = useRef<string | null>(null);
   const displayNormalRef = useRef(displayNormal);
   displayNormalRef.current = displayNormal;
+  const displayPreviewInfoRef = useRef<DisplayPreviewInfo | null>(null);
   const displayOutlineRef = useRef<LinesMesh | null>(null);
+
+  // Blind state
+  const blindMeshMapRef = useRef<BlindMeshMap>({});
+  const [blinds, setBlinds] = useState<BlindConfig[]>([]);
+  const [blindEditIdx, setBlindEditIdx] = useState<number | null>(null);
+  const [blindPanelOpen, setBlindPanelOpen] = useState(false);
+  const blindPanelOpenRef = useRef(blindPanelOpen);
+  blindPanelOpenRef.current = blindPanelOpen;
+  const blindsRef = useRef(blinds);
+  blindsRef.current = blinds;
+  const blindPreviewInfoRef = useRef<BlindPreviewInfo>({ size: { width: 1.2, height: 1.6, depth: 0.04 }, rotationY: 0, slats: 10 });
+  const blindPreviewIdRef = useRef<string | null>(null);
 
   // Shadow wall state
   const [shadowWalls, setShadowWalls] = useState<ShadowWallConfig[]>([]);
@@ -135,6 +280,7 @@ export default function ConfigEditor() {
   shadowWallsRef.current = shadowWalls;
   // Pink wireframe meshes shown in the editor when walls tab is active
   const wallEditorMeshesRef = useRef<Mesh[]>([]);
+  const wallEditorMatRef = useRef<StandardMaterial | null>(null);
   const wallPreviewInfoRef = useRef<WallPreviewInfo>({ size: { width: 5, height: 0.05, depth: 5 } });
 
   // Tube state
@@ -160,12 +306,343 @@ export default function ConfigEditor() {
   positionRef.current = position;
   const panelOpenRef = useRef(panelOpen);
   panelOpenRef.current = panelOpen;
+  const pendingGizmoPositionRef = useRef<LightPosition | null>(null);
+  const gizmoPositionFrameRef = useRef<number | null>(null);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
     setToastVisible(true);
     setTimeout(() => setToastVisible(false), 2000);
   }, []);
+
+  const handleEditorTexturesChange = useCallback((enabled: boolean) => {
+    setShowTextures(enabled);
+    updateSettings('render', { showTextures: enabled });
+    const scene = sceneCtxRef.current?.scene;
+    if (!scene) return;
+    setTexturesEnabled(scene, modelMeshesRef.current, enabled, getSetting('render').edgeWidth, false);
+    edgeOutlineRef.current?.setEnabled(!enabled);
+  }, []);
+
+  const scheduleGizmoPosition = useCallback((newPos: LightPosition) => {
+    positionRef.current = newPos;
+    pendingGizmoPositionRef.current = newPos;
+    if (gizmoPositionFrameRef.current !== null) return;
+    gizmoPositionFrameRef.current = window.requestAnimationFrame(() => {
+      gizmoPositionFrameRef.current = null;
+      const pending = pendingGizmoPositionRef.current;
+      if (!pending) return;
+      pendingGizmoPositionRef.current = null;
+      setPosition(pending);
+    });
+  }, []);
+
+  const flushGizmoPosition = useCallback(() => {
+    if (gizmoPositionFrameRef.current !== null) {
+      window.cancelAnimationFrame(gizmoPositionFrameRef.current);
+      gizmoPositionFrameRef.current = null;
+    }
+    const pending = pendingGizmoPositionRef.current ?? positionRef.current;
+    pendingGizmoPositionRef.current = null;
+    setPosition({ ...pending });
+  }, []);
+
+  const syncModelObjectList = useCallback((importedObjects: ImportedModelObjectConfig[]) => {
+    setModelObjects([
+      ...baseModelObjectsRef.current,
+      ...importedObjects.map((object) => ({
+        id: object.id,
+        label: object.label,
+        kind: 'uploaded' as const,
+      })),
+    ]);
+  }, []);
+
+  const disposeImportedObjects = useCallback(() => {
+    for (const result of Object.values(importedObjectResultsRef.current)) {
+      disposeImportedObject(result);
+    }
+    for (const object of importedModelObjectsRef.current) {
+      delete modelObjectMeshesRef.current[object.id];
+    }
+    importedObjectResultsRef.current = {};
+  }, []);
+
+  const loadImportedObjectsIntoScene = useCallback(
+    async (objects: ImportedModelObjectConfig[], scene: Scene) => {
+      disposeImportedObjects();
+      importedModelObjectsRef.current = objects;
+      syncModelObjectList(objects);
+
+      for (const object of objects) {
+        const blob = await getModelObjectBlob(object.id);
+        if (!blob) continue;
+        try {
+          const loaded = await loadImportedObject(scene, blob, object, {
+            parent: entityScaleRootRef.current ?? undefined,
+            editor: true,
+          });
+          importedObjectResultsRef.current[object.id] = loaded;
+          modelObjectMeshesRef.current[object.id] = loaded.root;
+        } catch (error) {
+          console.warn('[Editor] Failed to load imported object:', object.fileName, error);
+        }
+      }
+    },
+    [disposeImportedObjects, syncModelObjectList],
+  );
+
+  const detachModelObjectGizmo = useCallback(() => {
+    if (modelObjectGizmoRef.current) {
+      modelObjectGizmoRef.current.dispose();
+      modelObjectGizmoRef.current = null;
+    }
+    if (selectedModelObjectMeshRef.current) {
+      selectedModelObjectMeshRef.current.showBoundingBox = false;
+      selectedModelObjectMeshRef.current = null;
+    }
+  }, []);
+
+  const persistModelObjectOverride = useCallback((mesh: AbstractMesh) => {
+    const id = mesh.metadata?.modelObjectId as string | undefined;
+    if (!id) return;
+
+    const label = mesh.metadata?.modelObjectLabel as string | undefined;
+    const transform = readModelObjectTransform(mesh);
+    const cfg = getConfig();
+    const importedObjectId = mesh.metadata?.importedObjectId as string | undefined;
+
+    if (importedObjectId) {
+      const updatedObjects = (cfg.model?.importedObjects ?? []).map((object) =>
+        object.id === importedObjectId ? { ...object, ...transform } : object,
+      );
+      importedModelObjectsRef.current = updatedObjects;
+      updateConfig({
+        model: {
+          ...cfg.model,
+          scale: getModelScale(cfg.model),
+          objectOverrides: cfg.model?.objectOverrides ?? [],
+          importedObjects: updatedObjects,
+        },
+      });
+      showToast(t('editor.modelObjectSaved'));
+      return;
+    }
+
+    const override: ModelObjectOverride = { id, label, ...transform };
+    const updatedOverrides = [
+      ...(cfg.model?.objectOverrides ?? []).filter((item) => item.id !== id),
+      override,
+    ];
+
+    modelObjectOverridesRef.current = updatedOverrides;
+    updateConfig({
+      model: {
+        ...cfg.model,
+        scale: getModelScale(cfg.model),
+        objectOverrides: updatedOverrides,
+        importedObjects: cfg.model?.importedObjects ?? [],
+      },
+    });
+    showToast(t('editor.modelObjectSaved'));
+  }, [showToast, t]);
+
+  const centerModelObjectPivot = useCallback((mesh: AbstractMesh) => {
+    try {
+      mesh.computeWorldMatrix(true);
+      mesh.refreshBoundingInfo({});
+      const bounds = mesh.getBoundingInfo().boundingBox;
+      const center = Vector3.Lerp(bounds.minimum, bounds.maximum, 0.5);
+      mesh.setPivotPoint(center, Space.LOCAL);
+    } catch {
+      // Imported helper nodes can have incomplete bounds; leave their pivot untouched.
+    }
+  }, []);
+
+  const attachModelObjectGizmo = useCallback((mesh: AbstractMesh, mode: EditorTransformMode) => {
+    const scene = sceneCtxRef.current?.scene;
+    if (!scene) return;
+    centerModelObjectPivot(mesh);
+
+    if (modelObjectGizmoRef.current) {
+      modelObjectGizmoRef.current.dispose();
+      modelObjectGizmoRef.current = null;
+    }
+    if (!utilLayerRef.current) {
+      utilLayerRef.current = new UtilityLayerRenderer(scene);
+    }
+
+    const gizmo = createGizmoForMode(mode, utilLayerRef.current);
+    gizmo.anchorPoint = GizmoAnchorPoint.Pivot;
+    gizmo.attachedMesh = mesh;
+    gizmo.onDragEndObservable.add(() => persistModelObjectOverride(mesh));
+
+    setUtilityMeshAlpha(utilLayerRef.current, 0.55);
+    modelObjectGizmoRef.current = gizmo;
+  }, [centerModelObjectPivot, persistModelObjectOverride]);
+
+  const handleSelectModelObject = useCallback((id: string) => {
+    setEditorMode('modelObjects');
+    setSelectedModelObjectId(id);
+  }, []);
+
+  const handleSelectModelObjectRef = useRef(handleSelectModelObject);
+  handleSelectModelObjectRef.current = handleSelectModelObject;
+
+  const handleResetSelectedModelObject = useCallback(() => {
+    if (!selectedModelObjectId) return;
+    const mesh = modelObjectMeshesRef.current[selectedModelObjectId];
+    if (!mesh) return;
+    const importedObject = importedModelObjectsRef.current.find((object) => object.id === selectedModelObjectId);
+    if (importedObject) {
+      const resetTransform = {
+        position: importedObject.position,
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      };
+      applyModelObjectTransform(mesh, resetTransform);
+      const cfg = getConfig();
+      const updatedObjects = (cfg.model?.importedObjects ?? []).map((object) =>
+        object.id === selectedModelObjectId ? { ...object, ...readModelObjectTransform(mesh) } : object,
+      );
+      importedModelObjectsRef.current = updatedObjects;
+      updateConfig({
+        model: {
+          ...cfg.model,
+          scale: getModelScale(cfg.model),
+          objectOverrides: cfg.model?.objectOverrides ?? [],
+          importedObjects: updatedObjects,
+        },
+      });
+      syncModelObjectList(updatedObjects);
+      attachModelObjectGizmo(mesh, transformModeRef.current);
+      showToast(t('editor.modelObjectReset'));
+      return;
+    }
+
+    const original = getOriginalModelObjectTransform(mesh);
+    if (!original) return;
+
+    applyModelObjectTransform(mesh, original);
+    const cfg = getConfig();
+    const updatedOverrides = (cfg.model?.objectOverrides ?? []).filter((item) => item.id !== selectedModelObjectId);
+    modelObjectOverridesRef.current = updatedOverrides;
+    updateConfig({
+      model: {
+        ...cfg.model,
+        scale: getModelScale(cfg.model),
+        objectOverrides: updatedOverrides,
+        importedObjects: cfg.model?.importedObjects ?? [],
+      },
+    });
+    attachModelObjectGizmo(mesh, transformModeRef.current);
+    showToast(t('editor.modelObjectReset'));
+  }, [attachModelObjectGizmo, selectedModelObjectId, showToast, syncModelObjectList, t]);
+
+  const handleUploadModelObject = useCallback(async (file: File) => {
+    const scene = sceneCtxRef.current?.scene;
+    if (!scene) return;
+
+    const format = getImportedObjectFormat(file.name);
+    if (!isSupportedImportedObjectFormat(format)) {
+      showToast(t('modelObjects.unsupportedFormat', { format: format || '?' }));
+      return;
+    }
+
+    const id = generateUUID();
+    const label = file.name.replace(/\.[^.]+$/, '') || t('modelObjects.uploadedObject');
+    const defaultPosition = homeTargetRef.current
+      ? worldToConfigPosition(homeTargetRef.current, modelScaleRef.current)
+      : { x: 0, y: 0, z: 0 };
+    const object: ImportedModelObjectConfig = {
+      id,
+      label,
+      fileName: file.name,
+      format,
+      position: defaultPosition,
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+    };
+
+    try {
+      await uploadModelObject(id, file);
+      const loaded = await loadImportedObject(scene, file, object, {
+        parent: entityScaleRootRef.current ?? undefined,
+        editor: true,
+      });
+      importedObjectResultsRef.current[id] = loaded;
+      modelObjectMeshesRef.current[id] = loaded.root;
+
+      const cfg = getConfig();
+      const updatedObjects = [...(cfg.model?.importedObjects ?? []), object];
+      importedModelObjectsRef.current = updatedObjects;
+      updateConfig({
+        model: {
+          ...cfg.model,
+          scale: getModelScale(cfg.model),
+          objectOverrides: cfg.model?.objectOverrides ?? [],
+          importedObjects: updatedObjects,
+        },
+      });
+      syncModelObjectList(updatedObjects);
+      setEditorMode('modelObjects');
+      setSelectedModelObjectId(id);
+      showToast(t('modelObjects.uploadedToast'));
+    } catch (error) {
+      console.error('[Editor] Failed to import model object:', error);
+      await deleteModelObjectAsset(id).catch(() => {});
+      showToast(t('modelObjects.uploadFailed'));
+    }
+  }, [showToast, syncModelObjectList, t]);
+
+  const handleDeleteSelectedModelObject = useCallback(async () => {
+    if (!selectedModelObjectId) return;
+    const selected = importedModelObjectsRef.current.find((object) => object.id === selectedModelObjectId);
+    if (!selected) return;
+
+    const result = importedObjectResultsRef.current[selected.id];
+    if (result) {
+      disposeImportedObject(result);
+      delete importedObjectResultsRef.current[selected.id];
+    }
+    delete modelObjectMeshesRef.current[selected.id];
+    await deleteModelObjectAsset(selected.id).catch(() => {});
+
+    const cfg = getConfig();
+    const updatedObjects = (cfg.model?.importedObjects ?? []).filter((object) => object.id !== selected.id);
+    importedModelObjectsRef.current = updatedObjects;
+    updateConfig({
+      model: {
+        ...cfg.model,
+        scale: getModelScale(cfg.model),
+        objectOverrides: cfg.model?.objectOverrides ?? [],
+        importedObjects: updatedObjects,
+      },
+    });
+    syncModelObjectList(updatedObjects);
+    setSelectedModelObjectId(null);
+    showToast(t('modelObjects.deletedToast'));
+  }, [selectedModelObjectId, showToast, syncModelObjectList, t]);
+
+  useEffect(() => {
+    if (editorMode !== 'modelObjects') {
+      detachModelObjectGizmo();
+      return;
+    }
+
+    const mesh = selectedModelObjectId ? modelObjectMeshesRef.current[selectedModelObjectId] : null;
+    if (!mesh) {
+      detachModelObjectGizmo();
+      return;
+    }
+
+    if (selectedModelObjectMeshRef.current && selectedModelObjectMeshRef.current !== mesh) {
+      selectedModelObjectMeshRef.current.showBoundingBox = false;
+    }
+    selectedModelObjectMeshRef.current = mesh;
+    mesh.showBoundingBox = true;
+    attachModelObjectGizmo(mesh, transformMode);
+  }, [attachModelObjectGizmo, detachModelObjectGizmo, editorMode, selectedModelObjectId, transformMode]);
 
 
   // Tour event: switch back to lights tab
@@ -187,12 +664,14 @@ export default function ConfigEditor() {
       gizmoRef.current = null;
     }
     if (previewMeshRef.current) {
+      previewMeshRef.current.material?.dispose();
       previewMeshRef.current.dispose();
       previewMeshRef.current = null;
     }
     for (const m of extraPreviewMeshesRef.current) m.dispose();
     extraPreviewMeshesRef.current = [];
     if (hitboxPreviewRef.current) {
+      hitboxPreviewRef.current.material?.dispose();
       hitboxPreviewRef.current.dispose();
       hitboxPreviewRef.current = null;
     }
@@ -251,12 +730,15 @@ export default function ConfigEditor() {
     // Dispose old
     for (const m of wallEditorMeshesRef.current) m.dispose();
     wallEditorMeshesRef.current = [];
+    wallEditorMatRef.current?.dispose();
+    wallEditorMatRef.current = null;
 
     const mat = new StandardMaterial('wall_editor_mat', scene);
     mat.emissiveColor = new Color3(1, 0.2, 0.8);
     mat.alpha = 0.3;
     mat.wireframe = true;
     mat.disableLighting = true;
+    wallEditorMatRef.current = mat;
 
     for (const w of walls) {
       const mesh = MeshBuilder.CreateBox(`wall_editor_${w.id}`, {
@@ -265,6 +747,14 @@ export default function ConfigEditor() {
         depth: w.size.depth,
       }, scene);
       mesh.position = new Vector3(w.position.x, w.position.y, w.position.z);
+      if (w.rotation) {
+        mesh.rotation.set(
+          Tools.ToRadians(w.rotation.x),
+          Tools.ToRadians(w.rotation.y),
+          Tools.ToRadians(w.rotation.z),
+        );
+      }
+      if (entityScaleRootRef.current) mesh.parent = entityScaleRootRef.current;
       mesh.material = mat;
       mesh.isPickable = false;
       wallEditorMeshesRef.current.push(mesh);
@@ -274,10 +764,20 @@ export default function ConfigEditor() {
   const disposeWallEditorMeshes = useCallback(() => {
     for (const m of wallEditorMeshesRef.current) m.dispose();
     wallEditorMeshesRef.current = [];
+    wallEditorMatRef.current?.dispose();
+    wallEditorMatRef.current = null;
   }, []);
 
   const updatePreviewMesh = useCallback(
-    (pos: LightPosition, shapeType: string, sizeOverrides: Record<string, number>, hitboxInfo?: { shape: string; size: Record<string, number>; position: LightPosition }, partsInfo?: Array<{ shape: string; size: Record<string, number>; position: LightPosition }>) => {
+    (
+      pos: LightPosition,
+      shapeType: string,
+      sizeOverrides: Record<string, number>,
+      rotation?: LightPosition,
+      scale?: LightPosition,
+      hitboxInfo?: { shape: string; size: Record<string, number>; position: LightPosition; rotation?: LightPosition; scale?: LightPosition },
+      partsInfo?: Array<{ shape: string; size: Record<string, number>; position: LightPosition; rotation?: LightPosition; scale?: LightPosition }>,
+    ) => {
       const scene = sceneCtxRef.current?.scene;
       if (!scene) return;
       clearPreview();
@@ -287,7 +787,24 @@ export default function ConfigEditor() {
       mat.alpha = 0.7;
       mat.disableLighting = true;
 
-      const createPreviewShape = (name: string, sh: string, sz: Record<string, number>, p: LightPosition): Mesh => {
+      const applyPreviewTransform = (m: Mesh, r?: LightPosition, s?: LightPosition) => {
+        if (r) {
+          m.rotation.set(
+            (r.x * Math.PI) / 180,
+            (r.y * Math.PI) / 180,
+            (r.z * Math.PI) / 180,
+          );
+        }
+        if (s) {
+          m.scaling.multiplyInPlace(new Vector3(
+            Math.max(0.001, s.x),
+            Math.max(0.001, s.y),
+            Math.max(0.001, s.z),
+          ));
+        }
+      };
+
+      const createPreviewShape = (name: string, sh: string, sz: Record<string, number>, p: LightPosition, r?: LightPosition, s?: LightPosition): Mesh => {
         let m: Mesh;
         if (sh === 'cube') {
           m = MeshBuilder.CreateBox(name, {
@@ -295,12 +812,21 @@ export default function ConfigEditor() {
             height: sz.height ?? 0.3,
             depth: sz.depth ?? 0.3,
           }, scene);
+        } else if (sh === 'ellipsoid') {
+          m = MeshBuilder.CreateSphere(name, { diameter: 1 }, scene);
+          m.scaling = new Vector3(
+            sz.width ?? sz.diameter ?? 0.3,
+            sz.height ?? sz.diameter ?? 0.3,
+            sz.depth ?? sz.diameter ?? 0.3,
+          );
         } else {
           m = MeshBuilder.CreateSphere(name, {
             diameter: sz.diameter ?? 0.25,
           }, scene);
         }
         m.position = new Vector3(p.x, p.y, p.z);
+        applyPreviewTransform(m, r, s);
+        if (entityScaleRootRef.current) m.parent = entityScaleRootRef.current;
         m.isPickable = true;
         m.material = mat;
         return m;
@@ -309,15 +835,15 @@ export default function ConfigEditor() {
       let mesh: Mesh;
       if (partsInfo && partsInfo.length > 0) {
         // Multi-part preview
-        mesh = createPreviewShape('preview_0', partsInfo[0].shape, partsInfo[0].size, partsInfo[0].position);
+        mesh = createPreviewShape('preview_0', partsInfo[0].shape, partsInfo[0].size, partsInfo[0].position, partsInfo[0].rotation, partsInfo[0].scale);
         mesh.metadata = { previewTarget: 'part', partIndex: 0 };
         for (let i = 1; i < partsInfo.length; i++) {
-          const extra = createPreviewShape(`preview_${i}`, partsInfo[i].shape, partsInfo[i].size, partsInfo[i].position);
+          const extra = createPreviewShape(`preview_${i}`, partsInfo[i].shape, partsInfo[i].size, partsInfo[i].position, partsInfo[i].rotation, partsInfo[i].scale);
           extra.metadata = { previewTarget: 'part', partIndex: i };
           extraPreviewMeshesRef.current.push(extra);
         }
       } else {
-        mesh = createPreviewShape('preview', shapeType, sizeOverrides, pos);
+        mesh = createPreviewShape('preview', shapeType, sizeOverrides, pos, rotation, scale);
         mesh.metadata = { previewTarget: 'main' };
       }
 
@@ -330,6 +856,13 @@ export default function ConfigEditor() {
             height: hitboxInfo.size.height ?? 0.5,
             depth: hitboxInfo.size.depth ?? 0.5,
           }, scene);
+        } else if (hitboxInfo.shape === 'ellipsoid') {
+          hbMesh = MeshBuilder.CreateSphere('hitbox-preview', { diameter: 1 }, scene);
+          hbMesh.scaling = new Vector3(
+            hitboxInfo.size.width ?? hitboxInfo.size.diameter ?? 0.5,
+            hitboxInfo.size.height ?? hitboxInfo.size.diameter ?? 0.5,
+            hitboxInfo.size.depth ?? hitboxInfo.size.diameter ?? 0.5,
+          );
         } else {
           hbMesh = MeshBuilder.CreateSphere('hitbox-preview', {
             diameter: hitboxInfo.size.diameter ?? 0.5,
@@ -337,6 +870,8 @@ export default function ConfigEditor() {
         }
         const hbPos = hitboxInfo.position;
         hbMesh.position = new Vector3(hbPos.x, hbPos.y, hbPos.z);
+        applyPreviewTransform(hbMesh, hitboxInfo.rotation, hitboxInfo.scale);
+        if (entityScaleRootRef.current) hbMesh.parent = entityScaleRootRef.current;
         hbMesh.isPickable = true;
         hbMesh.metadata = { previewTarget: 'hitbox' };
         const hbMat = new StandardMaterial('hitbox-preview-mat', scene);
@@ -358,23 +893,23 @@ export default function ConfigEditor() {
       previewMeshRef.current = mesh;
       gizmoTargetRef.current = partsInfo?.length ? { type: 'part', index: 0 } : 'main';
 
-      // Attach position gizmo (RGB XYZ handles)
+      // Attach the active transform gizmo.
       if (!utilLayerRef.current) {
         utilLayerRef.current = new UtilityLayerRenderer(scene);
       }
-      const gizmo = new PositionGizmo(utilLayerRef.current);
-      gizmo.scaleRatio = 1.2;
+      const activeMode = transformModeRef.current;
+      const gizmo = createGizmoForMode(activeMode, utilLayerRef.current);
+      gizmo.anchorPoint = GizmoAnchorPoint.Pivot;
       gizmo.attachedMesh = mesh;
 
-      // Sync position back to React state on drag
       const onDragStart = () => {
         draggingGizmoRef.current = true;
-        const target = gizmoTargetRef.current;
-        if (target === 'main' || (typeof target === 'object' && target.type === 'part' && target.index === 0 && !(previewInfoRef.current.parts?.length))) {
+        if (activeMode === 'move') {
           posUndoStackRef.current.push({ ...positionRef.current });
         }
       };
       const onDrag = () => {
+        if (activeMode !== 'move') return;
         const target = gizmoTargetRef.current;
         // Only sync main light position to React state during drag
         if (target === 'main') {
@@ -384,17 +919,63 @@ export default function ConfigEditor() {
             y: parseFloat(p.y.toFixed(3)),
             z: parseFloat(p.z.toFixed(3)),
           };
-          positionRef.current = newPos;
-          setPosition(newPos);
+          scheduleGizmoPosition(newPos);
         }
         // For part/hitbox targets, the mesh moves via gizmo — no state update during drag
       };
       const onDragEnd = () => {
         draggingGizmoRef.current = false;
         document.dispatchEvent(new Event('tour:gizmo-used'));
+        const attached = gizmo.attachedMesh;
+        if (!attached) return;
+
+        if (wallPanelOpenRef.current) {
+          if (activeMode === 'rotate') {
+            wallFormRef.current?.updateRotation(rotationFromMesh(attached));
+          } else if (activeMode === 'scale') {
+            const currentSize = wallPreviewInfoRef.current.size;
+            wallFormRef.current?.updateSize({
+              width: currentSize.width * Math.max(0.001, attached.scaling.x),
+              height: currentSize.height * Math.max(0.001, attached.scaling.y),
+              depth: currentSize.depth * Math.max(0.001, attached.scaling.z),
+            });
+          } else {
+            flushGizmoPosition();
+          }
+          return;
+        }
+
         const target = gizmoTargetRef.current;
-        if (target !== 'main' && gizmo.attachedMesh) {
-          const p = gizmo.attachedMesh.position;
+        if (activeMode === 'rotate') {
+          const nextRotation = rotationFromMesh(attached);
+          if (target === 'main') {
+            lightFormRef.current?.updateVisualRotation(nextRotation);
+          } else if (typeof target === 'object' && target.type === 'part') {
+            lightFormRef.current?.updatePartRotation(target.index, nextRotation);
+          } else if (typeof target === 'object' && target.type === 'hitbox') {
+            lightFormRef.current?.updateHitboxRotation(nextRotation);
+          }
+          return;
+        }
+        if (activeMode === 'scale') {
+          const info = previewInfoRef.current;
+          if (target === 'main') {
+            lightFormRef.current?.updateVisualScale(scaleFromMesh(attached, info.shape, info.size));
+          } else if (typeof target === 'object' && target.type === 'part') {
+            const part = info.parts?.[target.index];
+            lightFormRef.current?.updatePartScale(target.index, scaleFromMesh(attached, part?.shape, part?.size));
+          } else if (typeof target === 'object' && target.type === 'hitbox') {
+            const hitbox = info.hitbox;
+            lightFormRef.current?.updateHitboxScale(scaleFromMesh(attached, hitbox?.shape, hitbox?.size));
+          }
+          return;
+        }
+        if (target === 'main') {
+          flushGizmoPosition();
+          return;
+        }
+        if (attached) {
+          const p = attached.position;
           const newPos: LightPosition = {
             x: parseFloat(p.x.toFixed(3)),
             y: parseFloat(p.y.toFixed(3)),
@@ -408,21 +989,15 @@ export default function ConfigEditor() {
           }
         }
       };
-      for (const ax of [gizmo.xGizmo, gizmo.yGizmo, gizmo.zGizmo]) {
-        ax.dragBehavior.onDragStartObservable.add(onDragStart);
-        ax.dragBehavior.onDragObservable.add(onDrag);
-        ax.dragBehavior.onDragEndObservable.add(onDragEnd);
-      }
+      gizmo.onDragStartObservable.add(onDragStart);
+      gizmo.onDragObservable.add(onDrag);
+      gizmo.onDragEndObservable.add(onDragEnd);
       // Make gizmo arrows semi-transparent
-      for (const m of utilLayerRef.current!.utilityLayerScene.meshes) {
-        if (m.material) {
-          (m.material as StandardMaterial).alpha = 0.5;
-        }
-      }
+      setUtilityMeshAlpha(utilLayerRef.current, 0.5);
 
       gizmoRef.current = gizmo;
     },
-    [clearPreview],
+    [clearPreview, flushGizmoPosition, scheduleGizmoPosition],
   );
 
   // Placing mode
@@ -440,6 +1015,7 @@ export default function ConfigEditor() {
     const ctx = sceneCtxRef.current;
     if (ctx && canvasRef.current) {
       ctx.camera.inputs.addPointers();
+      applyCameraControlSensitivity(ctx.camera);
       ctx.camera.attachControl(canvasRef.current, true);
       canvasRef.current.style.cursor = 'default';
     }
@@ -456,6 +1032,60 @@ export default function ConfigEditor() {
     const radiusForWidth = (ms.x / 2) / (Math.tan(fov / 2) * aspect * 0.75);
     return Math.max(radiusForHeight, radiusForWidth);
   }, []);
+
+  const recenterView = useCallback(() => {
+    const ctx = sceneCtxRef.current;
+    const homeTarget = homeTargetRef.current;
+    if (!ctx || !homeTarget || homingRef.current) return;
+    const { camera, scene } = ctx;
+    homingRef.current = true;
+    camera.detachControl();
+
+    const fps = 60;
+    const frames = 45;
+    const ease = new CubicEase();
+    ease.setEasingMode(EasingFunction.EASINGMODE_EASEINOUT);
+
+    const makeAnim = (prop: string, from: number, to: number) => {
+      const a = new Animation(`home_${prop}`, prop, fps, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CONSTANT);
+      a.setKeys([{ frame: 0, value: from }, { frame: frames, value: to }]);
+      a.setEasingFunction(ease);
+      return a;
+    };
+
+    const targetRadius = computeIdealRadius();
+    const targetAlpha = Tools.ToRadians(270);
+    const targetBeta = Tools.ToRadians(0.5);
+    const targetPos = homeTarget.clone();
+
+    const EPS = 0.002;
+    if (
+      Math.abs(camera.radius - targetRadius) < EPS &&
+      Math.abs(camera.alpha - targetAlpha) < EPS &&
+      Math.abs(camera.beta - targetBeta) < EPS &&
+      Vector3.Distance(camera.target, targetPos) < EPS
+    ) {
+      homingRef.current = false;
+      camera.attachControl(true);
+      return;
+    }
+
+    const targetAnim = new Animation('home_target', 'target', fps, Animation.ANIMATIONTYPE_VECTOR3, Animation.ANIMATIONLOOPMODE_CONSTANT);
+    targetAnim.setKeys([{ frame: 0, value: camera.target.clone() }, { frame: frames, value: targetPos }]);
+    targetAnim.setEasingFunction(ease);
+
+    camera.animations = [
+      makeAnim('radius', camera.radius, targetRadius),
+      makeAnim('alpha', camera.alpha, targetAlpha),
+      makeAnim('beta', camera.beta, targetBeta),
+      targetAnim,
+    ];
+
+    scene.beginAnimation(camera, 0, frames, false, 1, () => {
+      camera.attachControl(true);
+      homingRef.current = false;
+    });
+  }, [computeIdealRadius]);
 
   // Initialize scene
   useEffect(() => {
@@ -474,12 +1104,18 @@ export default function ConfigEditor() {
         setLights(config.lights || []);
         lightsRef.current = config.lights || [];
         setLightGroups(config.lightGroups || []);
+        setBlinds(config.blinds || []);
+        blindsRef.current = config.blinds || [];
         setDisplays(config.displays || []);
         displaysRef.current = config.displays || [];
         setShadowWalls(config.shadowWalls || []);
         shadowWallsRef.current = config.shadowWalls || [];
         setTubes(config.tubes || []);
         tubesRef.current = config.tubes || [];
+        modelScaleRef.current = getModelScale(config.model);
+        modelObjectOverridesRef.current = config.model?.objectOverrides ?? [];
+        importedModelObjectsRef.current = config.model?.importedObjects ?? [];
+        entityScaleRootRef.current = createSceneScaleRoot(ctx.scene, modelScaleRef.current);
 
         // Load model from IndexedDB
         const modelBlob = await getModelBlob();
@@ -487,11 +1123,31 @@ export default function ConfigEditor() {
           navigate('/onboarding');
           return;
         }
-        const result = await loadModel(ctx.scene, modelBlob);
+        const renderSettingsAtLoad = getSetting('render');
+        setShowTextures(renderSettingsAtLoad.showTextures);
+        const result = await loadModel(ctx.scene, modelBlob, undefined, {
+          showTextures: renderSettingsAtLoad.showTextures,
+          sketchColor: renderSettingsAtLoad.sketchColor,
+          sketchSpecular: renderSettingsAtLoad.sketchSpecular,
+          edgeRendering: false,
+          modelScale: modelScaleRef.current,
+          objectOverrides: modelObjectOverridesRef.current,
+        });
         if (disposed) return;
 
         const modelMeshes = result.meshes.filter((m) => m.getTotalVertices?.() > 0);
-        createEdgeOutline(ctx.scene, ctx.camera, { meshes: modelMeshes });
+        modelMeshesRef.current = modelMeshes;
+        modelObjectMeshesRef.current = Object.fromEntries(
+          result.editableObjects.map((obj) => [obj.id, obj.mesh]),
+        );
+        baseModelObjectsRef.current = result.editableObjects.map(({ id, label }) => ({
+          id,
+          label,
+          kind: 'model',
+        }));
+        syncModelObjectList(importedModelObjectsRef.current);
+        edgeOutlineRef.current = createEdgeOutline(ctx.scene, ctx.camera, { meshes: modelMeshes });
+        edgeOutlineRef.current.setEnabled(!renderSettingsAtLoad.showTextures);
 
         const target = result.center.clone();
         target.y = 0;
@@ -507,10 +1163,16 @@ export default function ConfigEditor() {
         ctx.camera.radius = computeIdealRadius();
 
         // Build light meshes
-        rebuildAllMeshes(ctx.scene, meshMapRef.current, config.lights || []);
+        rebuildAllMeshes(ctx.scene, meshMapRef.current, config.lights || [], {
+          parent: entityScaleRootRef.current ?? undefined,
+          sceneScale: modelScaleRef.current,
+        });
+
+        // Build blind meshes
+        rebuildAllBlindMeshes(ctx.scene, blindMeshMapRef.current, config.blinds || [], entityScaleRootRef.current ?? undefined);
 
         // Build display meshes (editor-only preview — no live HA data, show placeholder)
-        rebuildAllDisplayMeshes(ctx.scene, displayMeshMapRef.current, config.displays || []);
+        rebuildAllDisplayMeshes(ctx.scene, displayMeshMapRef.current, config.displays || [], entityScaleRootRef.current ?? undefined);
         for (const entry of Object.values(displayMeshMapRef.current)) {
           entry.plane.isPickable = true;
           updateDisplayTexture(entry, buildMockupStates(displaysRef.current));
@@ -518,9 +1180,10 @@ export default function ConfigEditor() {
 
         // Build tube meshes (editor preview — no live data, show mockup values)
         for (const tc of (config.tubes || [])) {
-          tubeMeshMapRef.current[tc.id] = createTubeMeshes(ctx.scene, tc, null);
+          tubeMeshMapRef.current[tc.id] = createTubeMeshes(ctx.scene, tc, null, entityScaleRootRef.current ?? undefined);
         }
         renderMockupLabels(tubeMeshMapRef.current);
+        await loadImportedObjectsIntoScene(importedModelObjectsRef.current, ctx.scene);
       } catch (e) {
         if (!disposed) console.warn('[Editor] Init error:', e);
       }
@@ -529,11 +1192,11 @@ export default function ConfigEditor() {
     // Pointer move — coordinate readout
     ctx.scene.onPointerMove = (_evt, pick) => {
       if (pick.hit && pick.pickedPoint) {
-        const p = pick.pickedPoint;
+        const p = worldToConfigPosition(pick.pickedPoint, modelScaleRef.current);
         setCoordText(`x: ${p.x.toFixed(2)}  z: ${p.y.toFixed(2)}  y: ${p.z.toFixed(2)}`);
         if (placingModeRef.current && canvas) canvas.style.cursor = 'crosshair';
       } else {
-        setCoordText('x: \u2014  z: \u2014  y: \u2014');
+        setCoordText(t('editor.coordEmpty'));
         if (!placingModeRef.current && canvas) canvas.style.cursor = 'default';
       }
     };
@@ -551,7 +1214,7 @@ export default function ConfigEditor() {
         const placePick = ctx.scene.pick(evt.offsetX, evt.offsetY, (m) => !m.metadata?.previewTarget);
         if (!placePick.hit || !placePick.pickedPoint) return;
         posUndoStackRef.current.push({ ...positionRef.current });
-        const p = placePick.pickedPoint;
+        const p = worldToConfigPosition(placePick.pickedPoint, modelScaleRef.current);
 
         // Display placing mode: capture normal
         if (displayPanelOpenRef.current) {
@@ -561,27 +1224,35 @@ export default function ConfigEditor() {
             : { x: 0, y: 0, z: 1 };
           setDisplayNormal(n);
           const newPos: LightPosition = {
-            x: parseFloat(p.x.toFixed(3)),
-            y: parseFloat(p.y.toFixed(3)),
-            z: parseFloat(p.z.toFixed(3)),
+            x: p.x,
+            y: p.y,
+            z: p.z,
+          };
+          setPosition(newPos);
+          positionRef.current = newPos;
+        } else if (blindPanelOpenRef.current) {
+          const newPos: LightPosition = {
+            x: p.x,
+            y: p.y,
+            z: p.z,
           };
           setPosition(newPos);
           positionRef.current = newPos;
         } else if (wallPanelOpenRef.current) {
           // Wall placing mode: exact position, no offset
           const newPos: LightPosition = {
-            x: parseFloat(p.x.toFixed(3)),
-            y: parseFloat(p.y.toFixed(3)),
-            z: parseFloat(p.z.toFixed(3)),
+            x: p.x,
+            y: p.y,
+            z: p.z,
           };
           setPosition(newPos);
           positionRef.current = newPos;
         } else {
           // Light placing mode: offset Y slightly
           const newPos: LightPosition = {
-            x: parseFloat(p.x.toFixed(3)),
+            x: p.x,
             y: parseFloat((p.y + 0.2).toFixed(3)),
-            z: parseFloat(p.z.toFixed(3)),
+            z: p.z,
           };
           setPosition(newPos);
           positionRef.current = newPos;
@@ -591,6 +1262,7 @@ export default function ConfigEditor() {
         document.dispatchEvent(new Event('tour:entity-placed'));
         // Re-enable camera
         ctx.camera.inputs.addPointers();
+        applyCameraControlSensitivity(ctx.camera);
         ctx.camera.attachControl(canvas, true);
         if (canvas) canvas.style.cursor = 'default';
         return;
@@ -635,12 +1307,18 @@ export default function ConfigEditor() {
         }
         return;
       }
-      // Skip click-to-edit when already editing a display, wall, or tube
-      if (displayPanelOpenRef.current || wallPanelOpenRef.current || tubePanelOpenRef.current) return;
+      // Skip click-to-edit when already editing a display, blind, wall, or tube
+      if (displayPanelOpenRef.current || blindPanelOpenRef.current || wallPanelOpenRef.current || tubePanelOpenRef.current) return;
 
       // Pick under pointer
       const pick = ctx.scene.pick(evt.offsetX, evt.offsetY);
       if (!pick?.hit) return;
+
+      if (editorModeRef.current === 'modelObjects') {
+        const modelObjectId = pick.pickedMesh?.metadata?.modelObjectId as string | undefined;
+        if (modelObjectId) handleSelectModelObjectRef.current(modelObjectId);
+        return;
+      }
 
       // Click on a light bulb mesh to edit it
       if (pick.pickedMesh?.metadata?.entityId) {
@@ -657,6 +1335,15 @@ export default function ConfigEditor() {
         const idx = displaysRef.current.findIndex((d) => d.id === clickedId);
         if (idx !== -1) {
           handleEditDisplayRef.current(idx);
+        }
+      }
+
+      // Click on a blind mesh to edit it
+      if (pick.pickedMesh?.metadata?.blindId) {
+        const clickedId = pick.pickedMesh.metadata.blindId;
+        const idx = blindsRef.current.findIndex((b) => b.id === clickedId);
+        if (idx !== -1) {
+          handleEditBlindRef.current(idx);
         }
       }
 
@@ -677,13 +1364,20 @@ export default function ConfigEditor() {
       Object.keys(meshMapRef.current).forEach((id) =>
         removeLightMesh(meshMapRef.current, id),
       );
+      Object.keys(blindMeshMapRef.current).forEach((id) =>
+        removeBlindMesh(blindMeshMapRef.current, id),
+      );
       Object.keys(displayMeshMapRef.current).forEach((id) =>
         removeDisplayMesh(displayMeshMapRef.current, id),
       );
       disposeAllTubes(tubeMeshMapRef.current);
       clearPreview();
-      for (const m of wallEditorMeshesRef.current) m.dispose();
-      wallEditorMeshesRef.current = [];
+      detachModelObjectGizmo();
+      disposeImportedObjects();
+      edgeOutlineRef.current?.dispose();
+      edgeOutlineRef.current = null;
+      modelMeshesRef.current = [];
+      disposeWallEditorMeshes();
       if (utilLayerRef.current) {
         utilLayerRef.current.dispose();
         utilLayerRef.current = null;
@@ -701,7 +1395,7 @@ export default function ConfigEditor() {
       return;
     }
     const info = previewInfoRef.current;
-    updatePreviewMesh(position, info.shape, info.size, info.hitbox, info.parts);
+    updatePreviewMesh(position, info.shape, info.size, info.rotation, info.scale, info.hitbox, info.parts);
   }, [position, panelOpen, updatePreviewMesh]);
 
   // Update display preview mesh position when position changes (skip during gizmo drag)
@@ -717,6 +1411,17 @@ export default function ConfigEditor() {
       position.z + normal.z * 0.005,
     );
   }, [position, displayPanelOpen, displayNormal]);
+
+  // Update blind preview mesh position when position changes
+  useEffect(() => {
+    if (!blindPanelOpen || !blindPreviewIdRef.current) return;
+    if (draggingGizmoRef.current) return;
+    const entry = blindMeshMapRef.current[blindPreviewIdRef.current];
+    if (!entry) return;
+    entry.config = { ...entry.config, position };
+    entry.frame.position.set(position.x, position.y, position.z);
+    updateBlindPosition(entry, 50);
+  }, [position, blindPanelOpen]);
 
   // Wrap setPosition for slider changes: push undo entry on first change after idle
   const sliderIdleRef = useRef(true);
@@ -751,7 +1456,7 @@ export default function ConfigEditor() {
 
       // Ctrl+Z undo (must check before the modifier guard)
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
-        if (!panelOpenRef.current && !displayPanelOpenRef.current && !wallPanelOpenRef.current && !tubePanelOpenRef.current) return;
+        if (!panelOpenRef.current && !displayPanelOpenRef.current && !blindPanelOpenRef.current && !wallPanelOpenRef.current && !tubePanelOpenRef.current) return;
         const stack = posUndoStackRef.current;
         if (stack.length === 0) return;
         e.preventDefault();
@@ -770,58 +1475,7 @@ export default function ConfigEditor() {
       }
       if (e.key === ' ') {
         e.preventDefault();
-        const ctx = sceneCtxRef.current;
-        const homeTarget = homeTargetRef.current;
-        if (!ctx || !homeTarget || homingRef.current) return;
-        const { camera, scene } = ctx;
-        homingRef.current = true;
-        camera.detachControl();
-
-        const fps = 60;
-        const frames = 45;
-        const ease = new CubicEase();
-        ease.setEasingMode(EasingFunction.EASINGMODE_EASEINOUT);
-
-        const makeAnim = (prop: string, from: number, to: number) => {
-          const a = new Animation(`home_${prop}`, prop, fps, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CONSTANT);
-          a.setKeys([{ frame: 0, value: from }, { frame: frames, value: to }]);
-          a.setEasingFunction(ease);
-          return a;
-        };
-
-        const targetRadius = computeIdealRadius();
-        const targetAlpha = Tools.ToRadians(270);
-        const targetBeta = Tools.ToRadians(0.5);
-        const targetPos = homeTarget.clone();
-
-        // Skip if already at home — avoids detach/reattach glitch
-        const EPS = 0.002;
-        if (
-          Math.abs(camera.radius - targetRadius) < EPS &&
-          Math.abs(camera.alpha - targetAlpha) < EPS &&
-          Math.abs(camera.beta - targetBeta) < EPS &&
-          Vector3.Distance(camera.target, targetPos) < EPS
-        ) {
-          homingRef.current = false;
-          camera.attachControl(true);
-          return;
-        }
-
-        const targetAnim = new Animation('home_target', 'target', fps, Animation.ANIMATIONTYPE_VECTOR3, Animation.ANIMATIONLOOPMODE_CONSTANT);
-        targetAnim.setKeys([{ frame: 0, value: camera.target.clone() }, { frame: frames, value: targetPos }]);
-        targetAnim.setEasingFunction(ease);
-
-        camera.animations = [
-          makeAnim('radius', camera.radius, targetRadius),
-          makeAnim('alpha', camera.alpha, targetAlpha),
-          makeAnim('beta', camera.beta, targetBeta),
-          targetAnim,
-        ];
-
-        scene.beginAnimation(camera, 0, frames, false, 1, () => {
-          camera.attachControl(true);
-          homingRef.current = false;
-        });
+        recenterView();
         return;
       }
       if (e.key === 'Escape') {
@@ -833,6 +1487,11 @@ export default function ConfigEditor() {
         if (displayPanelOpenRef.current) {
           e.preventDefault();
           handleCloseDisplayPanelRef.current();
+          return;
+        }
+        if (blindPanelOpenRef.current) {
+          e.preventDefault();
+          handleCloseBlindPanelRef.current();
           return;
         }
         if (wallPanelOpenRef.current) {
@@ -849,7 +1508,7 @@ export default function ConfigEditor() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [navigate, recenterView]);
 
   // Handle shape/size changes from LightForm
   const handlePreviewChange = useCallback(
@@ -861,7 +1520,7 @@ export default function ConfigEditor() {
         return;
       }
       if (panelOpen) {
-        updatePreviewMesh(position, info.shape, info.size, info.hitbox, info.parts);
+        updatePreviewMesh(position, info.shape, info.size, info.rotation, info.scale, info.hitbox, info.parts);
       }
     },
     [panelOpen, position, updatePreviewMesh],
@@ -909,14 +1568,17 @@ export default function ConfigEditor() {
       removeLightMesh(meshMapRef.current, id);
       const updated = lights.filter((_, i) => i !== idx);
       setLights(updated);
-      rebuildAllMeshes(scene, meshMapRef.current, updated);
+      rebuildAllMeshes(scene, meshMapRef.current, updated, {
+        parent: entityScaleRootRef.current ?? undefined,
+        sceneScale: modelScaleRef.current,
+      });
 
       try {
         await updateConfig({ lights: updated });
-        showToast('Light deleted & synced to server');
+        showToast(t('editor.lightDeletedSynced'));
       } catch (e) {
         console.error('[Config] Auto-save failed:', e);
-        showToast('Light deleted locally (server sync failed)');
+        showToast(t('editor.lightDeletedLocal'));
       }
     },
     [lights, showToast],
@@ -931,7 +1593,7 @@ export default function ConfigEditor() {
       const copy: LightConfig = {
         ...src,
         entityId: src.entityId + '_copy',
-        label: (src.label || src.entityId) + ' (copy)',
+        label: (src.label || src.entityId) + t('editor.copySuffix'),
         position: {
           x: src.position.x + 0.3,
           y: src.position.y,
@@ -940,14 +1602,17 @@ export default function ConfigEditor() {
       };
       const updated = [...lights, copy];
       setLights(updated);
-      rebuildAllMeshes(scene, meshMapRef.current, updated);
+      rebuildAllMeshes(scene, meshMapRef.current, updated, {
+        parent: entityScaleRootRef.current ?? undefined,
+        sceneScale: modelScaleRef.current,
+      });
 
       try {
         await updateConfig({ lights: updated });
-        showToast('Light duplicated & synced to server');
+        showToast(t('editor.lightDuplicatedSynced'));
       } catch (e) {
         console.error('[Config] Auto-save failed:', e);
-        showToast('Light duplicated locally (server sync failed)');
+        showToast(t('editor.lightDuplicatedLocal'));
       }
     },
     [lights, showToast],
@@ -1067,7 +1732,10 @@ export default function ConfigEditor() {
 
       setLights(updated);
       clearPreview();
-      rebuildAllMeshes(scene, meshMapRef.current, updated);
+      rebuildAllMeshes(scene, meshMapRef.current, updated, {
+        parent: entityScaleRootRef.current ?? undefined,
+        sceneScale: modelScaleRef.current,
+      });
       setPanelOpen(false);
       exitPlacingMode();
       setEditIdx(null);
@@ -1076,10 +1744,10 @@ export default function ConfigEditor() {
       // Auto-save to server
       try {
         await updateConfig({ lights: updated });
-        showToast('Light saved & synced to server');
+        showToast(t('editor.lightSavedSynced'));
       } catch (e) {
         console.error('[Config] Auto-save failed:', e);
-        showToast('Light saved locally (server sync failed)');
+        showToast(t('editor.lightSavedLocal'));
       }
     },
     [lights, editIdx, clearPreview, exitPlacingMode, showToast],
@@ -1124,10 +1792,10 @@ export default function ConfigEditor() {
 
       try {
         await updateConfig({ displays: updated });
-        showToast('Display deleted & synced to server');
+        showToast(t('editor.displayDeletedSynced'));
       } catch (e) {
         console.error('[Config] Auto-save failed:', e);
-        showToast('Display deleted locally (server sync failed)');
+        showToast(t('editor.displayDeletedLocal'));
       }
     },
     [displays, showToast],
@@ -1141,13 +1809,13 @@ export default function ConfigEditor() {
       const copy: DisplayConfig = {
         ...src,
         id: generateUUID(),
-        label: (src.label || src.id) + ' (copy)',
+        label: (src.label || src.id) + t('editor.copySuffix'),
         position: { ...src.position, x: src.position.x + 0.3 },
         sources: src.sources.map((s) => ({ ...s })),
       };
       const updated = [...displays, copy];
       setDisplays(updated);
-      rebuildAllDisplayMeshes(scene, displayMeshMapRef.current, updated);
+      rebuildAllDisplayMeshes(scene, displayMeshMapRef.current, updated, entityScaleRootRef.current ?? undefined);
       for (const entry of Object.values(displayMeshMapRef.current)) {
         entry.plane.isPickable = true;
         updateDisplayTexture(entry, {});
@@ -1155,10 +1823,10 @@ export default function ConfigEditor() {
 
       try {
         await updateConfig({ displays: updated });
-        showToast('Display duplicated & synced to server');
+        showToast(t('editor.displayDuplicatedSynced'));
       } catch (e) {
         console.error('[Config] Auto-save failed:', e);
-        showToast('Display duplicated locally (server sync failed)');
+        showToast(t('editor.displayDuplicatedLocal'));
       }
     },
     [displays, showToast],
@@ -1175,7 +1843,7 @@ export default function ConfigEditor() {
     if (scene && displayEditIdx !== null) {
       const cfg = displaysRef.current[displayEditIdx];
       if (cfg) {
-        const entry = createDisplayMesh(scene, cfg);
+        const entry = createDisplayMesh(scene, cfg, entityScaleRootRef.current ?? undefined);
         entry.plane.isPickable = true;
         displayMeshMapRef.current[cfg.id] = entry;
         updateDisplayTexture(entry, buildMockupStates(displaysRef.current));
@@ -1195,6 +1863,7 @@ export default function ConfigEditor() {
     (info: DisplayPreviewInfo) => {
       const scene = sceneCtxRef.current?.scene;
       if (!scene) return;
+      displayPreviewInfoRef.current = info;
 
       // Determine which display ID we're previewing
       const editIdx = displayEditIdx;
@@ -1215,11 +1884,12 @@ export default function ConfigEditor() {
       const tempCfg: DisplayConfig = {
         id: previewId,
         label: '',
+        kind: info.kind !== 'info' ? info.kind : undefined,
         sources: info.sources,
         position: positionRef.current,
         normal: displayNormalRef.current,
-        width: 0,
-        height: 0,
+        width: info.width,
+        height: info.height,
         textAlign: info.textAlign,
         opacity: info.opacity,
         backgroundColor: info.backgroundColor,
@@ -1227,7 +1897,7 @@ export default function ConfigEditor() {
         mirrorV: info.mirrorV,
       };
 
-      const entry = createDisplayMesh(scene, tempCfg);
+      const entry = createDisplayMesh(scene, tempCfg, entityScaleRootRef.current ?? undefined);
       entry.plane.isPickable = false;
       displayMeshMapRef.current[previewId] = entry;
       updateDisplayTexture(entry, buildMockupStates([tempCfg]));
@@ -1235,7 +1905,7 @@ export default function ConfigEditor() {
       // Show purple outline around the preview display
       showDisplayOutline(entry.plane);
 
-      // Attach position gizmo to display plane
+      // Attach active transform gizmo to display plane
       if (gizmoRef.current) {
         gizmoRef.current.dispose();
         gizmoRef.current = null;
@@ -1243,16 +1913,19 @@ export default function ConfigEditor() {
       if (!utilLayerRef.current) {
         utilLayerRef.current = new UtilityLayerRenderer(scene);
       }
-      const gizmo = new PositionGizmo(utilLayerRef.current);
-      gizmo.scaleRatio = 1.2;
-      gizmo.updateGizmoRotationToMatchAttachedMesh = false;
+      const activeMode = transformModeRef.current;
+      const gizmo = createGizmoForMode(activeMode, utilLayerRef.current);
+      gizmo.anchorPoint = GizmoAnchorPoint.Pivot;
       gizmo.attachedMesh = entry.plane;
 
       const onDragStart = () => {
         draggingGizmoRef.current = true;
-        posUndoStackRef.current.push({ ...positionRef.current });
+        if (activeMode === 'move') {
+          posUndoStackRef.current.push({ ...positionRef.current });
+        }
       };
       const onDrag = () => {
+        if (activeMode !== 'move') return;
         const p = entry.plane.position;
         const n = displayNormalRef.current;
         const len = Math.sqrt(n.x * n.x + n.y * n.y + n.z * n.z) || 1;
@@ -1261,23 +1934,36 @@ export default function ConfigEditor() {
           y: parseFloat((p.y - (n.y / len) * 0.005).toFixed(3)),
           z: parseFloat((p.z - (n.z / len) * 0.005).toFixed(3)),
         };
-        positionRef.current = newPos;
-        setPosition(newPos);
+        scheduleGizmoPosition(newPos);
       };
-      const onDragEnd = () => { draggingGizmoRef.current = false; document.dispatchEvent(new Event('tour:gizmo-used')); };
-      for (const ax of [gizmo.xGizmo, gizmo.yGizmo, gizmo.zGizmo]) {
-        ax.dragBehavior.onDragStartObservable.add(onDragStart);
-        ax.dragBehavior.onDragObservable.add(onDrag);
-        ax.dragBehavior.onDragEndObservable.add(onDragEnd);
-      }
-      for (const m of utilLayerRef.current!.utilityLayerScene.meshes) {
-        if (m.material) {
-          (m.material as StandardMaterial).alpha = 0.5;
+      const onDragEnd = () => {
+        draggingGizmoRef.current = false;
+        if (activeMode === 'rotate') {
+          const nextNormal = displayNormalFromPlane(entry.plane);
+          displayNormalRef.current = nextNormal;
+          setDisplayNormal(nextNormal);
+          const currentInfo = displayPreviewInfoRef.current;
+          if (currentInfo) {
+            window.requestAnimationFrame(() => handleDisplayPreviewChange(currentInfo));
+          }
+        } else if (activeMode === 'scale') {
+          const baseSize = meshLocalSize(entry.plane);
+          displayFormRef.current?.updateSize(
+            baseSize.width * Math.max(0.001, Math.abs(entry.plane.scaling.x)),
+            baseSize.height * Math.max(0.001, Math.abs(entry.plane.scaling.y)),
+          );
+        } else {
+          flushGizmoPosition();
         }
-      }
+        document.dispatchEvent(new Event('tour:gizmo-used'));
+      };
+      gizmo.onDragStartObservable.add(onDragStart);
+      gizmo.onDragObservable.add(onDrag);
+      gizmo.onDragEndObservable.add(onDragEnd);
+      setUtilityMeshAlpha(utilLayerRef.current, 0.5);
       gizmoRef.current = gizmo;
     },
-    [displayEditIdx, showDisplayOutline],
+    [displayEditIdx, flushGizmoPosition, scheduleGizmoPosition, showDisplayOutline],
   );
 
   const handleSaveDisplay = useCallback(
@@ -1302,7 +1988,7 @@ export default function ConfigEditor() {
 
       setDisplays(updated);
       clearPreview();
-      rebuildAllDisplayMeshes(scene, displayMeshMapRef.current, updated);
+      rebuildAllDisplayMeshes(scene, displayMeshMapRef.current, updated, entityScaleRootRef.current ?? undefined);
       for (const entry of Object.values(displayMeshMapRef.current)) {
         entry.plane.isPickable = true;
         updateDisplayTexture(entry, buildMockupStates(updated));
@@ -1313,13 +1999,221 @@ export default function ConfigEditor() {
 
       try {
         await updateConfig({ displays: updated });
-        showToast('Display saved & synced to server');
+        showToast(t('editor.displaySavedSynced'));
       } catch (e) {
         console.error('[Config] Auto-save failed:', e);
-        showToast('Display saved locally (server sync failed)');
+        showToast(t('editor.displaySavedLocal'));
       }
     },
     [displays, displayEditIdx, clearPreview, exitPlacingMode, showToast],
+  );
+
+  // --- Blind handlers ---
+
+  const removeBlindPreview = useCallback(() => {
+    if (gizmoRef.current) {
+      gizmoRef.current.dispose();
+      gizmoRef.current = null;
+    }
+    const previewId = blindPreviewIdRef.current;
+    if (previewId) {
+      removeBlindMesh(blindMeshMapRef.current, previewId);
+      blindPreviewIdRef.current = null;
+    }
+  }, []);
+
+  const handleAddBlind = useCallback(() => {
+    setBlindEditIdx(null);
+    setPosition({ x: 0, y: 1.5, z: 0 });
+    posUndoStackRef.current = [];
+    setBlindPanelOpen(true);
+  }, []);
+
+  const handleEditBlind = useCallback(
+    (idx: number) => {
+      const cfg = blinds[idx];
+      setBlindEditIdx(idx);
+      setPosition(cfg.position);
+      posUndoStackRef.current = [];
+      setBlindPanelOpen(true);
+    },
+    [blinds],
+  );
+
+  const handleEditBlindRef = useRef(handleEditBlind);
+  handleEditBlindRef.current = handleEditBlind;
+
+  const handleDeleteBlind = useCallback(
+    async (idx: number) => {
+      const id = blinds[idx].id;
+      removeBlindMesh(blindMeshMapRef.current, id);
+      const updated = blinds.filter((_, i) => i !== idx);
+      setBlinds(updated);
+      try {
+        await updateConfig({ blinds: updated });
+        showToast(t('editor.blindDeletedSynced'));
+      } catch (e) {
+        console.error('[Config] Auto-save failed:', e);
+        showToast(t('editor.blindDeletedLocal'));
+      }
+    },
+    [blinds, showToast],
+  );
+
+  const handleDuplicateBlind = useCallback(
+    async (idx: number) => {
+      const scene = sceneCtxRef.current?.scene;
+      if (!scene) return;
+      const src = blinds[idx];
+      const copy: BlindConfig = {
+        ...src,
+        id: generateUUID(),
+        label: (src.label || src.entityId) + t('editor.copySuffix'),
+        position: { ...src.position, x: src.position.x + 0.3 },
+      };
+      const updated = [...blinds, copy];
+      setBlinds(updated);
+      rebuildAllBlindMeshes(scene, blindMeshMapRef.current, updated, entityScaleRootRef.current ?? undefined);
+      try {
+        await updateConfig({ blinds: updated });
+        showToast(t('editor.blindDuplicatedSynced'));
+      } catch (e) {
+        console.error('[Config] Auto-save failed:', e);
+        showToast(t('editor.blindDuplicatedLocal'));
+      }
+    },
+    [blinds, showToast],
+  );
+
+  const handleBlindPreviewChange = useCallback(
+    (info: BlindPreviewInfo) => {
+      const scene = sceneCtxRef.current?.scene;
+      if (!scene || !blindPanelOpenRef.current) return;
+      blindPreviewInfoRef.current = info;
+
+      const editingCfg = blindsRef.current[blindEditIdx ?? -1];
+      const previewId = editingCfg?.id || '__blind_preview__';
+      if (blindPreviewIdRef.current) {
+        removeBlindMesh(blindMeshMapRef.current, blindPreviewIdRef.current);
+      } else if (editingCfg) {
+        removeBlindMesh(blindMeshMapRef.current, previewId);
+      }
+      blindPreviewIdRef.current = previewId;
+
+      const tempCfg: BlindConfig = {
+        id: previewId,
+        entityId: editingCfg?.entityId || '__preview_blind__',
+        label: editingCfg?.label || 'Blind preview',
+        position: positionRef.current,
+        size: info.size,
+        rotationY: info.rotationY,
+        slats: info.slats,
+      };
+      const entry = createBlindMesh(scene, tempCfg, 50, entityScaleRootRef.current ?? undefined);
+      blindMeshMapRef.current[previewId] = entry;
+
+      if (gizmoRef.current) {
+        gizmoRef.current.dispose();
+        gizmoRef.current = null;
+      }
+      if (!utilLayerRef.current) {
+        utilLayerRef.current = new UtilityLayerRenderer(scene);
+      }
+      const activeMode = transformModeRef.current;
+      const gizmo = createGizmoForMode(activeMode, utilLayerRef.current);
+      gizmo.anchorPoint = GizmoAnchorPoint.Pivot;
+      gizmo.attachedMesh = entry.frame;
+
+      const onDragStart = () => {
+        draggingGizmoRef.current = true;
+        if (activeMode === 'move') {
+          posUndoStackRef.current.push({ ...positionRef.current });
+        }
+      };
+      const onDrag = () => {
+        if (activeMode !== 'move') return;
+        const p = entry.frame.position;
+        const newPos: LightPosition = {
+          x: parseFloat(p.x.toFixed(3)),
+          y: parseFloat(p.y.toFixed(3)),
+          z: parseFloat(p.z.toFixed(3)),
+        };
+        entry.config = { ...entry.config, position: newPos };
+        updateBlindPosition(entry, 50);
+        scheduleGizmoPosition(newPos);
+      };
+      const onDragEnd = () => {
+        draggingGizmoRef.current = false;
+        if (activeMode === 'rotate') {
+          blindFormRef.current?.updateRotationY(Tools.ToDegrees(entry.frame.rotation.y));
+        } else if (activeMode === 'scale') {
+          const currentSize = blindPreviewInfoRef.current.size;
+          blindFormRef.current?.updateSize({
+            width: currentSize.width * Math.max(0.001, Math.abs(entry.frame.scaling.x)),
+            height: currentSize.height * Math.max(0.001, Math.abs(entry.frame.scaling.y)),
+            depth: currentSize.depth * Math.max(0.001, Math.abs(entry.frame.scaling.z)),
+          });
+        } else {
+          flushGizmoPosition();
+        }
+        document.dispatchEvent(new Event('tour:gizmo-used'));
+      };
+      gizmo.onDragStartObservable.add(onDragStart);
+      gizmo.onDragObservable.add(onDrag);
+      gizmo.onDragEndObservable.add(onDragEnd);
+      setUtilityMeshAlpha(utilLayerRef.current, 0.5);
+      gizmoRef.current = gizmo;
+    },
+    [blindEditIdx, flushGizmoPosition, scheduleGizmoPosition],
+  );
+
+  const handleCloseBlindPanel = useCallback(() => {
+    removeBlindPreview();
+    const scene = sceneCtxRef.current?.scene;
+    if (scene && blindEditIdx !== null) {
+      const cfg = blindsRef.current[blindEditIdx];
+      if (cfg) {
+        blindMeshMapRef.current[cfg.id] = createBlindMesh(scene, cfg, 0, entityScaleRootRef.current ?? undefined);
+      }
+    }
+    setBlindPanelOpen(false);
+    exitPlacingMode();
+    setBlindEditIdx(null);
+  }, [blindEditIdx, exitPlacingMode, removeBlindPreview]);
+  const handleCloseBlindPanelRef = useRef(handleCloseBlindPanel);
+  handleCloseBlindPanelRef.current = handleCloseBlindPanel;
+
+  const handleSaveBlind = useCallback(
+    async (cfg: BlindConfig) => {
+      const scene = sceneCtxRef.current?.scene;
+      if (!scene) return;
+
+      removeBlindPreview();
+
+      let updated: BlindConfig[];
+      if (blindEditIdx !== null) {
+        const oldId = blinds[blindEditIdx].id;
+        if (oldId !== cfg.id) removeBlindMesh(blindMeshMapRef.current, oldId);
+        updated = blinds.map((b, i) => (i === blindEditIdx ? cfg : b));
+      } else {
+        updated = [...blinds, cfg];
+      }
+
+      setBlinds(updated);
+      rebuildAllBlindMeshes(scene, blindMeshMapRef.current, updated, entityScaleRootRef.current ?? undefined);
+      setBlindPanelOpen(false);
+      exitPlacingMode();
+      setBlindEditIdx(null);
+
+      try {
+        await updateConfig({ blinds: updated });
+        showToast(t('editor.blindSavedSynced'));
+      } catch (e) {
+        console.error('[Config] Auto-save failed:', e);
+        showToast(t('editor.blindSavedLocal'));
+      }
+    },
+    [blinds, blindEditIdx, exitPlacingMode, removeBlindPreview, showToast],
   );
 
   // --- Shadow wall handlers ---
@@ -1348,10 +2242,10 @@ export default function ConfigEditor() {
       setShadowWalls(updated);
       try {
         await updateConfig({ shadowWalls: updated });
-        showToast('Wall deleted & synced to server');
+        showToast(t('editor.wallDeletedSynced'));
       } catch (e) {
         console.error('[Config] Auto-save failed:', e);
-        showToast('Wall deleted locally (server sync failed)');
+        showToast(t('editor.wallDeletedLocal'));
       }
     },
     [shadowWalls, showToast],
@@ -1363,7 +2257,7 @@ export default function ConfigEditor() {
       const copy: ShadowWallConfig = {
         ...src,
         id: generateUUID(),
-        label: (src.label || 'Wall') + ' (copy)',
+        label: (src.label || 'Wall') + t('editor.copySuffix'),
         position: { ...src.position, x: src.position.x + 0.5 },
         size: { ...src.size },
       };
@@ -1371,10 +2265,10 @@ export default function ConfigEditor() {
       setShadowWalls(updated);
       try {
         await updateConfig({ shadowWalls: updated });
-        showToast('Wall duplicated & synced to server');
+        showToast(t('editor.wallDuplicatedSynced'));
       } catch (e) {
         console.error('[Config] Auto-save failed:', e);
-        showToast('Wall duplicated locally (server sync failed)');
+        showToast(t('editor.wallDuplicatedLocal'));
       }
     },
     [shadowWalls, showToast],
@@ -1398,6 +2292,7 @@ export default function ConfigEditor() {
           position,
           'cube',
           { width: info.size.width, height: info.size.height, depth: info.size.depth },
+          info.rotation,
         );
       }
     },
@@ -1420,10 +2315,10 @@ export default function ConfigEditor() {
 
       try {
         await updateConfig({ shadowWalls: updated });
-        showToast('Wall saved & synced to server');
+        showToast(t('editor.wallSavedSynced'));
       } catch (e) {
         console.error('[Config] Auto-save failed:', e);
-        showToast('Wall saved locally (server sync failed)');
+        showToast(t('editor.wallSavedLocal'));
       }
     },
     [shadowWalls, wallEditIdx, clearPreview, exitPlacingMode, showToast],
@@ -1441,6 +2336,7 @@ export default function ConfigEditor() {
       position,
       'cube',
       { width: info.size.width, height: info.size.height, depth: info.size.depth },
+      info.rotation,
     );
   }, [position, wallPanelOpen, updatePreviewMesh]);
 
@@ -1475,10 +2371,10 @@ export default function ConfigEditor() {
       setTubes(updated);
       try {
         await updateConfig({ tubes: updated });
-        showToast('Tube deleted & synced to server');
+        showToast(t('editor.tubeDeletedSynced'));
       } catch (e) {
         console.error('[Config] Auto-save failed:', e);
-        showToast('Tube deleted locally (server sync failed)');
+        showToast(t('editor.tubeDeletedLocal'));
       }
     },
     [tubes, showToast],
@@ -1490,7 +2386,7 @@ export default function ConfigEditor() {
       const copy: TubeConfig = {
         ...src,
         id: generateUUID(),
-        label: (src.label || 'Tube') + ' (copy)',
+        label: (src.label || 'Tube') + t('editor.copySuffix'),
         endX: src.endX + 0.5,
         lines: src.lines.map(l => ({ ...l })),
       };
@@ -1499,14 +2395,14 @@ export default function ConfigEditor() {
       // Create mesh for the copy
       const scene = sceneCtxRef.current?.scene;
       if (scene) {
-        tubeMeshMapRef.current[copy.id] = createTubeMeshes(scene, copy, null);
+        tubeMeshMapRef.current[copy.id] = createTubeMeshes(scene, copy, null, entityScaleRootRef.current ?? undefined);
       }
       try {
         await updateConfig({ tubes: updated });
-        showToast('Tube duplicated & synced to server');
+        showToast(t('editor.tubeDuplicatedSynced'));
       } catch (e) {
         console.error('[Config] Auto-save failed:', e);
-        showToast('Tube duplicated locally (server sync failed)');
+        showToast(t('editor.tubeDuplicatedLocal'));
       }
     },
     [tubes, showToast],
@@ -1527,7 +2423,7 @@ export default function ConfigEditor() {
     if (!scene) return;
     disposeAllTubes(tubeMeshMapRef.current);
     for (const tc of tubeConfigs) {
-      tubeMeshMapRef.current[tc.id] = createTubeMeshes(scene, tc, null);
+      tubeMeshMapRef.current[tc.id] = createTubeMeshes(scene, tc, null, entityScaleRootRef.current ?? undefined);
     }
     renderMockupLabels(tubeMeshMapRef.current);
   }, []);
@@ -1544,7 +2440,7 @@ export default function ConfigEditor() {
 
       // Create a temporary preview tube mesh
       const previewCfg: TubeConfig = { ...info.config, id: '__tube_preview__' };
-      tubeMeshMapRef.current['__tube_preview__'] = createTubeMeshes(scene, previewCfg, null);
+      tubeMeshMapRef.current['__tube_preview__'] = createTubeMeshes(scene, previewCfg, null, entityScaleRootRef.current ?? undefined);
       renderMockupLabels(tubeMeshMapRef.current);
     },
     [tubePanelOpen],
@@ -1572,16 +2468,16 @@ export default function ConfigEditor() {
       if (scene) {
         disposeAllTubes(tubeMeshMapRef.current);
         for (const tc of updated) {
-          tubeMeshMapRef.current[tc.id] = createTubeMeshes(scene, tc, null);
+          tubeMeshMapRef.current[tc.id] = createTubeMeshes(scene, tc, null, entityScaleRootRef.current ?? undefined);
         }
       }
 
       try {
         await updateConfig({ tubes: updated });
-        showToast('Tube saved & synced to server');
+        showToast(t('editor.tubeSavedSynced'));
       } catch (e) {
         console.error('[Config] Auto-save failed:', e);
-        showToast('Tube saved locally (server sync failed)');
+        showToast(t('editor.tubeSavedLocal'));
       }
     },
     [tubes, tubeEditIdx, clearPreview, showToast],
@@ -1612,6 +2508,7 @@ export default function ConfigEditor() {
     // Create a small anchor sphere at the endpoint
     const anchor = MeshBuilder.CreateSphere('tube-endpoint-anchor', { diameter: 0.15 }, scene);
     anchor.position = new Vector3(positionRef.current.x, 0, positionRef.current.z);
+    if (entityScaleRootRef.current) anchor.parent = entityScaleRootRef.current;
     anchor.isPickable = false;
     const mat = new StandardMaterial('tube-anchor-mat', scene);
     mat.emissiveColor = new Color3(0.2, 0.7, 1.0);
@@ -1645,14 +2542,12 @@ export default function ConfigEditor() {
         y: 0,
         z: parseFloat(p.z.toFixed(3)),
       };
-      positionRef.current = newPos;
-      setPosition(newPos);
+      scheduleGizmoPosition(newPos);
     };
     const onDragEnd = () => {
       draggingGizmoRef.current = false;
+      flushGizmoPosition();
       document.dispatchEvent(new Event('tour:gizmo-used'));
-      // Force tube preview rebuild at final position
-      setPosition({ ...positionRef.current });
     };
     for (const ax of [gizmo.xGizmo, gizmo.zGizmo]) {
       ax.dragBehavior.onDragStartObservable.add(onDragStart);
@@ -1674,7 +2569,7 @@ export default function ConfigEditor() {
       anchor.dispose();
       tubeAnchorRef.current = null;
     };
-  }, [tubePanelOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [flushGizmoPosition, scheduleGizmoPosition, tubePanelOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync tube anchor position during gizmo drag (skip tube rebuild)
   useEffect(() => {
@@ -1716,19 +2611,33 @@ export default function ConfigEditor() {
       endX: position.x,
       endZ: position.z,
     };
-    tubeMeshMapRef.current['__tube_preview__'] = createTubeMeshes(scene, previewCfg, null);
+    tubeMeshMapRef.current['__tube_preview__'] = createTubeMeshes(scene, previewCfg, null, entityScaleRootRef.current ?? undefined);
     renderMockupLabels(tubeMeshMapRef.current);
   }, [position, tubePanelOpen]);
+
+  // Recreate the active gizmo immediately when the global transform tool changes.
+  useEffect(() => {
+    if (panelOpenRef.current) {
+      const info = previewInfoRef.current;
+      updatePreviewMesh(positionRef.current, info.shape, info.size, info.rotation, info.scale, info.hitbox, info.parts);
+    } else if (displayPanelOpenRef.current && displayPreviewInfoRef.current) {
+      handleDisplayPreviewChange(displayPreviewInfoRef.current);
+    } else if (blindPanelOpenRef.current) {
+      handleBlindPreviewChange(blindPreviewInfoRef.current);
+    } else if (wallPanelOpenRef.current) {
+      handleWallPreviewChange(wallPreviewInfoRef.current);
+    }
+  }, [transformMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Save config to server
   const handleSaveConfig = useCallback(async () => {
     try {
-      await updateConfig({ lights, lightGroups, displays, shadowWalls, tubes });
-      showToast(`Saved ${lights.length} lights + ${displays.length} displays + ${shadowWalls.length} walls + ${tubes.length} tubes to server`);
+      await updateConfig({ lights, lightGroups, blinds, displays, shadowWalls, tubes });
+      showToast(t('editor.savedSummary', { lights: lights.length, blinds: blinds.length, displays: displays.length, walls: shadowWalls.length, tubes: tubes.length }));
     } catch (e) {
-      alert('Failed to save config: ' + (e instanceof Error ? e.message : e));
+      alert(t('editor.saveConfigFailed', { message: e instanceof Error ? e.message : String(e) }));
     }
-  }, [lights, displays, shadowWalls, tubes, showToast]);
+  }, [lights, lightGroups, blinds, displays, shadowWalls, tubes, showToast]);
 
   // Load config from server
   const handleLoadConfig = useCallback(async () => {
@@ -1736,39 +2645,61 @@ export default function ConfigEditor() {
       const config = await getConfig();
       setLights(config.lights || []);
       setLightGroups(config.lightGroups || []);
+      setBlinds(config.blinds || []);
+      blindsRef.current = config.blinds || [];
       setDisplays(config.displays || []);
       setShadowWalls(config.shadowWalls || []);
       setTubes(config.tubes || []);
       tubesRef.current = config.tubes || [];
+      modelObjectOverridesRef.current = config.model?.objectOverrides ?? [];
+      importedModelObjectsRef.current = config.model?.importedObjects ?? [];
+      const overridesById = new Map(modelObjectOverridesRef.current.map((override) => [override.id, override]));
+      for (const [id, mesh] of Object.entries(modelObjectMeshesRef.current)) {
+        if (mesh.metadata?.importedObjectId) continue;
+        const override = overridesById.get(id);
+        if (override) {
+          applyModelObjectTransform(mesh, override);
+        } else {
+          const original = getOriginalModelObjectTransform(mesh);
+          if (original) applyModelObjectTransform(mesh, original);
+        }
+      }
       const scene = sceneCtxRef.current?.scene;
       if (scene) {
-        rebuildAllMeshes(scene, meshMapRef.current, config.lights || []);
-        rebuildAllDisplayMeshes(scene, displayMeshMapRef.current, config.displays || []);
+        rebuildAllMeshes(scene, meshMapRef.current, config.lights || [], {
+          parent: entityScaleRootRef.current ?? undefined,
+          sceneScale: modelScaleRef.current,
+        });
+        rebuildAllBlindMeshes(scene, blindMeshMapRef.current, config.blinds || [], entityScaleRootRef.current ?? undefined);
+        rebuildAllDisplayMeshes(scene, displayMeshMapRef.current, config.displays || [], entityScaleRootRef.current ?? undefined);
         for (const entry of Object.values(displayMeshMapRef.current)) {
           entry.plane.isPickable = true;
           updateDisplayTexture(entry, buildMockupStates(displaysRef.current));
         }
         disposeAllTubes(tubeMeshMapRef.current);
         for (const tc of (config.tubes || [])) {
-          tubeMeshMapRef.current[tc.id] = createTubeMeshes(scene, tc, null);
+          tubeMeshMapRef.current[tc.id] = createTubeMeshes(scene, tc, null, entityScaleRootRef.current ?? undefined);
         }
         renderMockupLabels(tubeMeshMapRef.current);
+        await loadImportedObjectsIntoScene(importedModelObjectsRef.current, scene);
+      } else {
+        syncModelObjectList(importedModelObjectsRef.current);
       }
-      showToast(`Loaded ${config.lights?.length || 0} lights + ${config.displays?.length || 0} displays + ${config.shadowWalls?.length || 0} walls + ${config.tubes?.length || 0} tubes`);
+      showToast(t('editor.loadedSummary', { lights: config.lights?.length || 0, blinds: config.blinds?.length || 0, displays: config.displays?.length || 0, walls: config.shadowWalls?.length || 0, tubes: config.tubes?.length || 0 }));
     } catch (e) {
-      alert('Failed to load config: ' + (e instanceof Error ? e.message : e));
+      alert(t('editor.loadConfigFailed', { message: e instanceof Error ? e.message : String(e) }));
     }
-  }, [showToast]);
+  }, [loadImportedObjectsIntoScene, showToast, syncModelObjectList, t]);
 
   return (
     <div className="config-editor">
       {/* Sidebar */}
       <div className="editor-sidebar">
         <div className="sidebar-header">
-          <span className="sidebar-title">&#9881; Editor</span>
+          <span className="sidebar-title">&#9881; {t('editor.title')}</span>
           <div className="sidebar-header-actions">
             <Link to="/" className="back-btn">
-              &larr; Dashboard
+              &larr; {t('editor.dashboard')}
             </Link>
           </div>
         </div>
@@ -1779,29 +2710,62 @@ export default function ConfigEditor() {
             className={`editor-tab${editorMode === 'lights' ? ' active' : ''}`}
             onClick={() => setEditorMode('lights')}
           >
-            Lights ({lights.length})
+            {t('editor.lights')} ({lights.length})
+          </button>
+          <button
+            className={`editor-tab${editorMode === 'blinds' ? ' active' : ''}`}
+            data-tab="blinds"
+            onClick={() => setEditorMode('blinds')}
+          >
+            {t('editor.blinds')} ({blinds.length})
           </button>
           <button
             className={`editor-tab${editorMode === 'displays' ? ' active' : ''}`}
             data-tab="displays"
             onClick={() => setEditorMode('displays')}
           >
-            Displays ({displays.length})
+            {t('editor.displays')} ({displays.length})
           </button>
           <button
             className={`editor-tab${editorMode === 'walls' ? ' active' : ''}`}
             data-tab="walls"
             onClick={() => setEditorMode('walls')}
           >
-            Walls ({shadowWalls.length})
+            {t('editor.walls')} ({shadowWalls.length})
           </button>
           <button
             className={`editor-tab${editorMode === 'tubes' ? ' active' : ''}`}
             data-tab="tubes"
             onClick={() => setEditorMode('tubes')}
           >
-            Tubes ({tubes.length})
+            {t('editor.tubes')} ({tubes.length})
           </button>
+          <button
+            className={`editor-tab${editorMode === 'modelObjects' ? ' active' : ''}`}
+            data-tab="modelObjects"
+            onClick={() => setEditorMode('modelObjects')}
+          >
+            {t('editor.modelObjects')} ({modelObjects.length})
+          </button>
+        </div>
+
+        <div className="editor-transform-tools" role="toolbar" aria-label={t('editor.transformTools')}>
+          {TRANSFORM_MODES.map((mode) => {
+            const Icon = mode === 'move' ? Move3d : mode === 'rotate' ? Rotate3d : Scale3d;
+            return (
+              <button
+                key={mode}
+                className={`editor-transform-btn${transformMode === mode ? ' active' : ''}`}
+                onClick={() => setTransformMode(mode)}
+                aria-label={t(`modelObjects.${mode}`)}
+                aria-pressed={transformMode === mode}
+                title={t(`modelObjects.${mode}`)}
+              >
+                <Icon size={14} strokeWidth={1.8} aria-hidden="true" />
+                <span>{t(`modelObjects.${mode}`)}</span>
+              </button>
+            );
+          })}
         </div>
 
         <div className="light-list">
@@ -1819,6 +2783,14 @@ export default function ConfigEditor() {
               onRenameGroup={handleRenameGroup}
               onDeleteGroup={handleDeleteGroup}
             />
+          ) : editorMode === 'blinds' ? (
+            <BlindList
+              blinds={blinds}
+              selectedIdx={blindEditIdx}
+              onSelect={handleEditBlind}
+              onDelete={handleDeleteBlind}
+              onDuplicate={handleDuplicateBlind}
+            />
           ) : editorMode === 'displays' ? (
             <DisplayList
               displays={displays}
@@ -1835,7 +2807,7 @@ export default function ConfigEditor() {
               onDelete={handleDeleteWall}
               onDuplicate={handleDuplicateWall}
             />
-          ) : (
+          ) : editorMode === 'tubes' ? (
             <TubeList
               tubes={tubes}
               selectedIdx={tubeEditIdx}
@@ -1843,32 +2815,55 @@ export default function ConfigEditor() {
               onDelete={handleDeleteTube}
               onDuplicate={handleDuplicateTube}
             />
+          ) : (
+            <ModelObjectList
+              objects={modelObjects}
+              selectedId={selectedModelObjectId}
+              onSelect={handleSelectModelObject}
+              onResetSelected={handleResetSelectedModelObject}
+              onUploadObject={handleUploadModelObject}
+              onDeleteSelected={handleDeleteSelectedModelObject}
+            />
           )}
         </div>
 
         <div className="sidebar-footer">
           {editorMode === 'lights' ? (
             <button className="btn btn-primary editor-add-btn" onClick={handleAddLight}>
-              + Add Light
+              {t('editor.addLight')}
+            </button>
+          ) : editorMode === 'blinds' ? (
+            <button className="btn btn-primary editor-add-btn" onClick={handleAddBlind}>
+              {t('editor.addBlind')}
             </button>
           ) : editorMode === 'displays' ? (
             <button className="btn btn-primary editor-add-btn" onClick={handleAddDisplay}>
-              + Add Display
+              {t('editor.addDisplay')}
             </button>
           ) : editorMode === 'walls' ? (
             <button className="btn btn-primary editor-add-btn" onClick={handleAddWall}>
-              + Add Wall
+              {t('editor.addWall')}
+            </button>
+          ) : editorMode === 'tubes' ? (
+            <button className="btn btn-primary editor-add-btn" onClick={handleAddTube}>
+              {t('editor.addTube')}
             </button>
           ) : (
-            <button className="btn btn-primary editor-add-btn" onClick={handleAddTube}>
-              + Add Tube
+            <button
+              className="btn btn-primary editor-add-btn"
+              disabled={!selectedModelObjectId}
+              onClick={() => {
+                if (selectedModelObjectId) handleSelectModelObject(selectedModelObjectId);
+              }}
+            >
+              {t('editor.editSelectedObject')}
             </button>
           )}
           <button className="btn btn-ghost" onClick={handleLoadConfig}>
-            &uarr; Reload from server
+            &uarr; {t('editor.reloadServer')}
           </button>
           <button className="btn btn-success" onClick={handleSaveConfig}>
-            &darr; Save to server
+            &darr; {t('editor.saveServer')}
           </button>
         </div>
       </div>
@@ -1877,7 +2872,30 @@ export default function ConfigEditor() {
       <div className="canvas-area editor-canvas">
         <canvas ref={canvasRef} />
         <div className={`mode-banner${placingMode ? ' visible' : ''}`}>
-          {displayPanelOpen ? 'Click on a wall surface to place display' : wallPanelOpen ? 'Click on the model to place wall' : 'Click on the model to place light'}
+          {displayPanelOpen ? t('editor.placeDisplayBanner') : blindPanelOpen ? t('editor.placeBlindBanner') : wallPanelOpen ? t('editor.placeWallBanner') : t('editor.placeLightBanner')}
+        </div>
+        <div className="editor-render-toggle">
+          <button
+            className={`editor-texture-toggle${showTextures ? ' active' : ''}`}
+            onClick={() => handleEditorTexturesChange(!showTextures)}
+            aria-label={`${t('settings.textures')} ${showTextures ? t('common.on') : t('common.off')}`}
+            aria-pressed={showTextures}
+            title={`${t('settings.textures')} ${showTextures ? t('common.on') : t('common.off')}`}
+          >
+            <span className="editor-texture-toggle-thumb">
+              {showTextures
+                ? <ImageIcon size={12} strokeWidth={1.8} aria-hidden="true" />
+                : <ImageOff size={12} strokeWidth={1.8} aria-hidden="true" />}
+            </span>
+          </button>
+          <button
+            className="editor-recenter-btn"
+            onClick={recenterView}
+            aria-label={t('common.recenter')}
+            title={t('common.recenter')}
+          >
+            <Crosshair size={12} strokeWidth={1.8} aria-hidden="true" />
+          </button>
         </div>
         <div className="coord-readout">{coordText}</div>
         <div className={`toast${toastVisible ? ' show' : ''}`}>{toastMsg}</div>
@@ -1898,6 +2916,7 @@ export default function ConfigEditor() {
         />
 
         <DisplayForm
+          ref={displayFormRef}
           open={displayPanelOpen}
           editDisplay={displayEditIdx !== null ? displays[displayEditIdx] : null}
           position={position}
@@ -1912,7 +2931,23 @@ export default function ConfigEditor() {
           haEntities={haEntities}
         />
 
+        <BlindForm
+          ref={blindFormRef}
+          open={blindPanelOpen}
+          editBlind={blindEditIdx !== null ? blinds[blindEditIdx] : null}
+          position={position}
+          onPositionChange={handlePositionChange}
+          onSave={handleSaveBlind}
+          onClose={handleCloseBlindPanel}
+          onEnterPlacingMode={enterPlacingMode}
+          onExitPlacingMode={exitPlacingMode}
+          onPreviewChange={handleBlindPreviewChange}
+          placingMode={placingMode}
+          haEntities={haEntities}
+        />
+
         <ShadowWallForm
+          ref={wallFormRef}
           open={wallPanelOpen}
           editWall={wallEditIdx !== null ? shadowWalls[wallEditIdx] : null}
           position={position}

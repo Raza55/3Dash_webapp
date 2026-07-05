@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { IndicatorCard, HAState, HAHistoryPoint } from '../../../types';
 import { fetchHistory, generateDemoHistory } from '../../../services/haHistoryApi';
 import { useDemoMode } from '../../../contexts/DemoModeContext';
+import { useTranslation } from '../../../contexts/LanguageContext';
 import LucideIcon from './LucideIcon';
 import './IndicatorModal.css';
 
@@ -70,6 +71,7 @@ export default function IndicatorModal({
   onSetHvacMode,
 }: Props) {
   const { demoMode } = useDemoMode();
+  const t = useTranslation();
   const [period, setPeriod] = useState<string>('24h');
   const [points, setPoints] = useState<HAHistoryPoint[]>([]);
   const [error, setError] = useState(false);
@@ -149,8 +151,8 @@ export default function IndicatorModal({
     .filter(p => !isNaN(p.value));
 
   const renderGraph = () => {
-    if (error) return <span className="im-graph-msg">Failed to load</span>;
-    if (numericPoints.length < 2) return <span className="im-graph-msg">Loading...</span>;
+    if (error) return <span className="im-graph-msg">{t('modal.failedToLoad')}</span>;
+    if (numericPoints.length < 2) return <span className="im-graph-msg">{t('common.loading')}</span>;
 
     const values = numericPoints.map(p => p.value);
     const times = numericPoints.map(p => p.time);
@@ -214,7 +216,8 @@ export default function IndicatorModal({
 
   // Determine status text
   const hvacAction = climateState?.attributes.hvac_action as string | undefined;
-  const climateStatus = isOff ? 'Off' : (hvacAction === 'heating' ? 'Heating' : 'Idle');
+  const climateStatusKey = isOff ? 'off' : (hvacAction === 'heating' ? 'heating' : 'idle');
+  const climateStatus = t(`modal.${climateStatusKey}`);
 
   // Arc geometry — 3 segments: dimmed orange (start→min(current,target)), bright orange (current→target), gray (max(current,target)→end)
   const targetAngle = tempToAngle(targetTemp, minTemp, maxTemp);
@@ -261,7 +264,7 @@ export default function IndicatorModal({
         <div className="im-body">
           {/* Graph */}
           <div className="im-section">
-            <span className="im-label">History</span>
+            <span className="im-label">{t('modal.history')}</span>
             <div className="im-graph">{renderGraph()}</div>
             <div className="im-periods">
               {PERIODS.map(p => (
@@ -297,7 +300,7 @@ export default function IndicatorModal({
                   </defs>
 
                   {/* Center glow — only when actively heating */}
-                  {climateStatus === 'Heating' && (
+                  {climateStatusKey === 'heating' && (
                     <circle cx={GAUGE_CX} cy={GAUGE_CY} r={GAUGE_R + GAUGE_STROKE} fill="url(#gaugeGlow)" />
                   )}
 
@@ -334,7 +337,7 @@ export default function IndicatorModal({
                     x={GAUGE_CX}
                     y={isOff ? GAUGE_CY + 5 : GAUGE_CY - 28}
                     textAnchor="middle"
-                    className={`im-gauge-status ${climateStatus.toLowerCase()}`}
+                    className={`im-gauge-status ${climateStatusKey}`}
                   >
                     {climateStatus}
                   </text>

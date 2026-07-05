@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { SidePanelCard } from '../../types';
 import EntityPicker, { type HAEntityOption } from '../EntityPicker';
+import { useTranslation } from '../../contexts/LanguageContext';
 import './CardPropertiesPanel.css';
 
 interface Props {
@@ -69,6 +70,7 @@ function buildCard(
 }
 
 export default function CardPropertiesPanel({ card, onSave, onCancel, onPreview, haEntities = [] }: Props) {
+  const t = useTranslation();
   const isEdit = !!card;
 
   const [type, setType] = useState<CardType>(card?.type ?? 'indicator');
@@ -147,32 +149,32 @@ export default function CardPropertiesPanel({ card, onSave, onCancel, onPreview,
       <div className="card-props-backdrop" onClick={onCancel} />
       <div className="card-props-panel">
         <div className="card-props-header">
-          <h3>{isEdit ? 'Edit Card' : 'Add Card'}</h3>
+          <h3>{isEdit ? t('cards.editCard') : t('cards.addCardTitle')}</h3>
           <button className="card-props-close" onClick={onCancel}>&times;</button>
         </div>
 
         <div className="card-props-body">
           <div className="card-props-field">
-            <label>Type</label>
+            <label>{t('cards.type')}</label>
             <select value={type} onChange={e => setType(e.target.value as CardType)} disabled={isEdit}>
-              <option value="indicator">Indicator</option>
-              <option value="script">Action</option>
-              <option value="graph">Graph</option>
+              <option value="indicator">{t('cards.indicator')}</option>
+              <option value="script">{t('cards.action')}</option>
+              <option value="graph">{t('cards.graph')}</option>
             </select>
           </div>
 
           <div className="card-props-field">
-            <label>Title</label>
-            <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Card title" />
+            <label>{t('cards.title')}</label>
+            <input value={title} onChange={e => setTitle(e.target.value)} placeholder={t('cards.cardTitlePlaceholder')} />
           </div>
 
           <label className="card-props-toggle">
             <input type="checkbox" checked={showTitle} onChange={e => setShowTitle(e.target.checked)} />
-            <span>Show title on card</span>
+            <span>{t('cards.showTitle')}</span>
           </label>
 
           <div className="card-props-field">
-            <label>Entity ID</label>
+            <label>{t('form.entityId')}</label>
             <EntityPicker
               value={entityId}
               onChange={setEntityId}
@@ -185,22 +187,22 @@ export default function CardPropertiesPanel({ card, onSave, onCancel, onPreview,
           {/* Type-specific fields */}
           {(type === 'script' || type === 'indicator') && (
             <div className="card-props-field">
-              <label>Icon (Lucide name)</label>
+              <label>{t('cards.iconLucide')}</label>
               <input value={icon} onChange={e => setIcon(e.target.value)} placeholder="Thermometer" />
             </div>
           )}
 
           {type === 'script' && (
             <>
-              <div className="card-props-section">Long Press Action</div>
+              <div className="card-props-section">{t('cards.longPressAction')}</div>
               <div className="card-props-field">
-                <label>Entity ID</label>
+                <label>{t('form.entityId')}</label>
                 <EntityPicker value={longPressEntityId} onChange={setLongPressEntityId} placeholder="script.my_action" entities={haEntities} />
               </div>
 
-              <div className="card-props-section">Double Press Action</div>
+              <div className="card-props-section">{t('cards.doublePressAction')}</div>
               <div className="card-props-field">
-                <label>Entity ID</label>
+                <label>{t('form.entityId')}</label>
                 <EntityPicker value={doublePressEntityId} onChange={setDoublePressEntityId} placeholder="script.my_action" entities={haEntities} />
               </div>
             </>
@@ -210,16 +212,16 @@ export default function CardPropertiesPanel({ card, onSave, onCancel, onPreview,
             <>
               <div className="card-props-row">
                 <div className="card-props-field">
-                  <label>Unit</label>
+                  <label>{t('form.unit')}</label>
                   <input value={unit} onChange={e => setUnit(e.target.value)} placeholder="°C" />
                 </div>
                 <div className="card-props-field">
-                  <label>Precision</label>
+                  <label>{t('cards.precision')}</label>
                   <input type="number" min="0" max="5" value={precision} onChange={e => setPrecision(e.target.value)} placeholder="1" />
                 </div>
               </div>
               <div className="card-props-field">
-                <label>Climate Entity (optional)</label>
+                <label>{t('cards.climateEntity')}</label>
                 <EntityPicker value={climateEntityId} onChange={setClimateEntityId} placeholder="climate.thermostat" entities={haEntities} />
               </div>
             </>
@@ -228,35 +230,35 @@ export default function CardPropertiesPanel({ card, onSave, onCancel, onPreview,
           {type === 'graph' && (
             <div className="card-props-row">
               <div className="card-props-field">
-                <label>Period</label>
+                <label>{t('cards.period')}</label>
                 <select value={period} onChange={e => setPeriod(e.target.value)}>
                   {PERIODS.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
               <div className="card-props-field">
-                <label>Refresh (s)</label>
+                <label>{t('cards.refresh')}</label>
                 <input type="number" min="30" value={refreshInterval} onChange={e => setRefreshInterval(e.target.value)} placeholder="300" />
               </div>
             </div>
           )}
 
-          <div className="card-props-section">Layout</div>
+          <div className="card-props-section">{t('cards.layout')}</div>
           <div className="card-props-row">
             <div className="card-props-field">
-              <label>Width (cols)</label>
+              <label>{t('cards.widthCols')}</label>
               <input type="number" min="1" max="4" value={w} onChange={e => setW(e.target.value)} />
             </div>
             <div className="card-props-field">
-              <label>Height (rows)</label>
+              <label>{t('cards.heightRows')}</label>
               <input type="number" min="1" max="6" value={h} onChange={e => setH(e.target.value)} />
             </div>
           </div>
         </div>
 
         <div className="card-props-footer">
-          <button className="card-props-btn card-props-btn-cancel" onClick={onCancel}>Cancel</button>
+          <button className="card-props-btn card-props-btn-cancel" onClick={onCancel}>{t('common.cancel')}</button>
           <button className="card-props-btn card-props-btn-save" onClick={handleSave} disabled={!canSave}>
-            {isEdit ? 'Save' : 'Add'}
+            {isEdit ? t('common.save') : t('common.add')}
           </button>
         </div>
       </div>

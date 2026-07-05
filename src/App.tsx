@@ -3,10 +3,11 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { DemoModeProvider } from './contexts/DemoModeContext';
 import { SimulationModeProvider, useSimulationMode } from './contexts/SimulationModeContext';
 import { CameraControlsProvider } from './contexts/CameraControlsContext';
+import { LanguageProvider } from './contexts/LanguageContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { hasConfig, getConfig } from './services/configApi';
-import Dashboard from './pages/Dashboard/Dashboard';
 
+const Dashboard = lazy(() => import('./pages/Dashboard/Dashboard'));
 const ConfigEditor = lazy(() => import('./pages/ConfigEditor/ConfigEditor'));
 const Onboarding = lazy(() => import('./pages/Onboarding/Onboarding'));
 
@@ -26,7 +27,7 @@ function AppRoutes() {
 
   return (
     <Routes>
-      <Route path="/" element={<Dashboard />} />
+      <Route path="/" element={<Suspense fallback={null}><Dashboard /></Suspense>} />
       <Route path="/editor" element={<Suspense fallback={null}><ConfigEditor /></Suspense>} />
       <Route path="/onboarding" element={<Suspense fallback={null}><Onboarding /></Suspense>} />
     </Routes>
@@ -36,13 +37,15 @@ function AppRoutes() {
 export default function App() {
   return (
     <ThemeProvider>
-      <DemoModeProvider>
-        <SimulationModeProvider>
-          <CameraControlsProvider>
-            <AppRoutes />
-          </CameraControlsProvider>
-        </SimulationModeProvider>
-      </DemoModeProvider>
+      <LanguageProvider>
+        <DemoModeProvider>
+          <SimulationModeProvider>
+            <CameraControlsProvider>
+              <AppRoutes />
+            </CameraControlsProvider>
+          </SimulationModeProvider>
+        </DemoModeProvider>
+      </LanguageProvider>
     </ThemeProvider>
   );
 }

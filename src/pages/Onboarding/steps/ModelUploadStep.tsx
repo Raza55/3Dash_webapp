@@ -1,11 +1,13 @@
 import { useState, useRef, useCallback } from 'react';
 import { uploadModel } from '../../../services/configApi';
+import { useTranslation } from '../../../contexts/LanguageContext';
 
 interface Props {
   onComplete: () => void;
 }
 
 export default function ModelUploadStep({ onComplete }: Props) {
+  const t = useTranslation();
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -15,12 +17,12 @@ export default function ModelUploadStep({ onComplete }: Props) {
 
   const handleFile = useCallback((f: File) => {
     if (!f.name.endsWith('.glb')) {
-      setError('Only .glb files are supported');
+      setError(t('onboarding.onlyGlb'));
       return;
     }
     setFile(f);
     setError('');
-  }, []);
+  }, [t]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -50,7 +52,7 @@ export default function ModelUploadStep({ onComplete }: Props) {
       }, 400);
     } catch {
       clearInterval(progressInterval);
-      setError('Upload failed. Please try again.');
+      setError(t('onboarding.uploadFailed'));
       setUploading(false);
       setProgress(0);
     }
@@ -64,8 +66,8 @@ export default function ModelUploadStep({ onComplete }: Props) {
   return (
     <div className="onboarding-step">
       <div>
-        <h1>3D Model</h1>
-        <h2>Upload your apartment model</h2>
+        <h1>{t('onboarding.modelTitle')}</h1>
+        <h2>{t('onboarding.modelSubtitle')}</h2>
       </div>
 
       <input
@@ -89,7 +91,7 @@ export default function ModelUploadStep({ onComplete }: Props) {
       >
         <div className="onboarding-upload-icon">{file ? '\u2713' : '\u21A5'}</div>
         <div className="onboarding-upload-text">
-          {file ? '' : 'Drop your .glb file here or click to browse'}
+          {file ? '' : t('onboarding.dropGlb')}
         </div>
         {file && (
           <div className="onboarding-upload-file">
@@ -108,12 +110,12 @@ export default function ModelUploadStep({ onComplete }: Props) {
       )}
 
       <div className="onboarding-tips">
-        <div className="onboarding-tips-title">Tips</div>
+        <div className="onboarding-tips-title">{t('onboarding.tips')}</div>
         <ul>
-          <li>Export from Blender or SketchUp as .glb (binary glTF)</li>
-          <li>Use real-world scale in meters</li>
-          <li>Keep polygon count reasonable for performance</li>
-          <li>The model will be auto-scaled if units are in millimeters</li>
+          <li>{t('onboarding.modelTip1')}</li>
+          <li>{t('onboarding.modelTip2')}</li>
+          <li>{t('onboarding.modelTip3')}</li>
+          <li>{t('onboarding.modelTip4')}</li>
         </ul>
       </div>
 
@@ -122,7 +124,7 @@ export default function ModelUploadStep({ onComplete }: Props) {
         onClick={handleUpload}
         disabled={!file || uploading}
       >
-        {uploading ? 'Uploading...' : 'Upload & Continue'}
+        {uploading ? t('onboarding.uploading') : t('onboarding.uploadContinue')}
       </button>
     </div>
   );

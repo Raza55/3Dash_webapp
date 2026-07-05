@@ -1,16 +1,40 @@
 import JSZip from 'jszip';
-import type { AppConfig, DisplayConfig, LightConfig, LightGroup, ShadowWallConfig, SidePanelConfig, TubeConfig } from '../types';
-import { saveModel as dbSaveModel, getModel as dbGetModel, deleteModel as dbDeleteModel } from './storageApi';
+import type { AppConfig, BlindConfig, DisplayConfig, LightConfig, LightGroup, ModelConfig, ShadowWallConfig, SidePanelConfig, TubeConfig } from '../types';
+import {
+  saveModel as dbSaveModel,
+  getModel as dbGetModel,
+  deleteModel as dbDeleteModel,
+  saveObjectAsset as dbSaveObjectAsset,
+  getObjectAsset as dbGetObjectAsset,
+  deleteObjectAsset as dbDeleteObjectAsset,
+  deleteObjectAssets as dbDeleteObjectAssets,
+} from './storageApi';
 import { getSettings, setAllSettings, type AppSettings } from './settingsStore';
 import { isSimulationActive } from '../contexts/SimulationModeContext';
+import { systemLocationWithNorthOffset } from '../constants/location';
 
 const CONFIG_KEY = 'config';
 
 const DEFAULT_CONFIG: AppConfig = {
-  location: { latitude: 43.6077, longitude: 3.8766 },
+  location: systemLocationWithNorthOffset(),
   lights: [],
+  model: { scale: 1, objectOverrides: [] },
   onboarding: { completed: false },
 };
+
+function normalizeConfig(config: Partial<AppConfig>): AppConfig {
+  return {
+    ...DEFAULT_CONFIG,
+    ...config,
+    location: systemLocationWithNorthOffset(config.location?.northOffset),
+    lights: config.lights ?? [],
+    model: {
+      scale: config.model?.scale ?? 1,
+      objectOverrides: config.model?.objectOverrides ?? [],
+      importedObjects: config.model?.importedObjects ?? [],
+    },
+  };
+}
 
 /** Returns true if a config has been saved to localStorage. */
 export function hasConfig(): boolean {
@@ -29,21 +53,23 @@ export function setSimulationConfigOverride(c: AppConfig | null): void {
 
 /** Read config from localStorage (or from the simulation override). */
 export function getConfig(): AppConfig {
-  if (simulationConfigOverride) return structuredClone(simulationConfigOverride);
+  if (simulationConfigOverride) return normalizeConfig(simulationConfigOverride);
 
   const raw = localStorage.getItem(CONFIG_KEY);
-  if (!raw) return { ...DEFAULT_CONFIG };
+  if (!raw) return normalizeConfig(DEFAULT_CONFIG);
   try {
-    return JSON.parse(raw) as AppConfig;
+    return normalizeConfig(JSON.parse(raw) as AppConfig);
   } catch {
-    return { ...DEFAULT_CONFIG };
+    return normalizeConfig(DEFAULT_CONFIG);
   }
 }
 
 /** Merge partial updates into the stored config and persist. */
 export function updateConfig(data: {
   lights?: LightConfig[];
+  blinds?: BlindConfig[];
   lightGroups?: LightGroup[];
+  model?: ModelConfig;
   displays?: DisplayConfig[];
   shadowWalls?: ShadowWallConfig[];
   location?: { latitude: number; longitude: number; northOffset?: number };
@@ -73,10 +99,24 @@ export async function getModelBlob(): Promise<Blob | null> {
   return dbGetModel();
 }
 
+export async function uploadModelObject(id: string, file: File): Promise<void> {
+  await dbSaveObjectAsset(id, file);
+}
+
+export async function getModelObjectBlob(id: string): Promise<Blob | null> {
+  return dbGetObjectAsset(id);
+}
+
+export async function deleteModelObjectAsset(id: string): Promise<void> {
+  await dbDeleteObjectAsset(id);
+}
+
 /** Remove config from localStorage and model from IndexedDB. */
 export async function resetConfig(): Promise<void> {
+  const config = getConfig();
   localStorage.removeItem(CONFIG_KEY);
   await dbDeleteModel();
+  await dbDeleteObjectAssets(config.model?.importedObjects?.map((obj) => obj.id) ?? []);
 }
 
 /** Export config + settings + model as a downloadable ZIP. */
@@ -95,6 +135,13 @@ export async function exportBackup(): Promise<void> {
   const modelBlob = await dbGetModel();
   if (modelBlob) {
     zip.file('apartment.glb', modelBlob);
+  }
+
+  for (const object of config.model?.importedObjects ?? []) {
+    const objectBlob = await dbGetObjectAsset(object.id);
+    if (objectBlob) {
+      zip.file(`objects/${object.id}.${object.format}`, objectBlob);
+    }
   }
 
   const blob = await zip.generateAsync({ type: 'blob' });
@@ -146,6 +193,13 @@ export async function importBackup(file: File): Promise<{ ok: boolean; hasModel:
     const modelBlob = await modelFile.async('blob');
     await dbSaveModel(modelBlob);
     hasModel = true;
+  }
+
+  for (const object of importedConfig.model?.importedObjects ?? []) {
+    const objectFile = zip.file(`objects/${object.id}.${object.format}`);
+    if (!objectFile) continue;
+    const objectBlob = await objectFile.async('blob');
+    await dbSaveObjectAsset(object.id, objectBlob);
   }
 
   return { ok: true, hasModel, hasSettings };

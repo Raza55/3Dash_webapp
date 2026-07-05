@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { TourStep } from './tourSteps';
+import { useTranslation } from '../../contexts/LanguageContext';
 import './GuidedTour.css';
 
 interface Props {
@@ -17,6 +18,7 @@ interface Rect {
 type ArrowDir = 'arrow-top' | 'arrow-bottom' | 'arrow-left' | 'arrow-right';
 
 export default function GuidedTour({ steps, onComplete }: Props) {
+  const t = useTranslation();
   const [current, setCurrent] = useState(0);
   const [targetRect, setTargetRect] = useState<Rect | null>(null);
   const [keyFulfilled, setKeyFulfilled] = useState(false);
@@ -243,20 +245,19 @@ export default function GuidedTour({ steps, onComplete }: Props) {
         className={`tour-tooltip ${arrow}${isCentered ? ' centered' : ''}`}
         style={isCentered ? {} : tooltipStyle}
       >
-        <div className="tour-tooltip-title">{step.title}</div>
+        <div className="tour-tooltip-title">{t(step.title)}</div>
         <div
           className="tour-tooltip-body"
-          dangerouslySetInnerHTML={{ __html: step.body }}
+          dangerouslySetInnerHTML={{ __html: t(step.body) }}
         />
         {needsAction && !keyFulfilled && (
-          <div className="tour-waiting-hint">
-            {needsKey
-              ? <>Waiting for <span className="tour-kbd">Space</span>...</>
-              : 'Try it before continuing...'}
-          </div>
+          <div
+            className="tour-waiting-hint"
+            dangerouslySetInnerHTML={{ __html: needsKey ? t('tour.waitingSpace') : t('tour.tryBeforeContinuing') }}
+          />
         )}
         {needsAction && keyFulfilled && (
-          <div className="tour-key-done">Nice! Press Next to continue.</div>
+          <div className="tour-key-done">{t('tour.doneHint')}</div>
         )}
         <div className="tour-tooltip-footer">
           <span className="tour-tooltip-counter">
@@ -264,11 +265,11 @@ export default function GuidedTour({ steps, onComplete }: Props) {
           </span>
           <div className="tour-tooltip-actions">
             <button className="tour-tooltip-btn" onClick={onComplete}>
-              Skip Tour
+              {t('tour.skip')}
             </button>
             {current > 0 && !autoAdvance && (
               <button className="tour-tooltip-btn" onClick={handleBack}>
-                Back
+                {t('common.back')}
               </button>
             )}
             {!autoAdvance && (
@@ -276,7 +277,7 @@ export default function GuidedTour({ steps, onComplete }: Props) {
                 className={`tour-tooltip-btn primary${nextDisabled ? ' disabled' : ''}`}
                 onClick={nextDisabled ? undefined : handleNext}
               >
-                {current >= steps.length - 1 ? 'Done' : 'Next'}
+                {current >= steps.length - 1 ? t('tour.done') : t('tour.next')}
               </button>
             )}
           </div>

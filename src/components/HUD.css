@@ -87,6 +87,90 @@
   margin-top: 2px;
 }
 
+.hud-status-lines {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  margin-top: 8px;
+}
+
+.hud-status-line {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  color: var(--text);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  line-height: 1.25;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.hud-status-icon-badge {
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  box-shadow: 0 0 14px rgba(15, 23, 42, 0.25);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+.hud-status-icon {
+  color: currentColor;
+}
+
+.hud-status-icon-badge.sun-day,
+.hud-status-icon-badge.weather-clear {
+  background: rgba(251, 191, 36, 0.16);
+  border-color: rgba(251, 191, 36, 0.28);
+  color: #fbbf24;
+}
+
+.hud-status-icon-badge.sun-night {
+  background: rgba(129, 140, 248, 0.14);
+  border-color: rgba(129, 140, 248, 0.28);
+  color: #a5b4fc;
+}
+
+.hud-status-icon-badge.weather-partly {
+  background: rgba(56, 189, 248, 0.14);
+  border-color: rgba(56, 189, 248, 0.25);
+  color: #7dd3fc;
+}
+
+.hud-status-icon-badge.weather-cloudy,
+.hud-status-icon-badge.weather-unavailable {
+  background: rgba(148, 163, 184, 0.16);
+  border-color: rgba(148, 163, 184, 0.26);
+  color: #cbd5e1;
+}
+
+.hud-status-icon-badge.weather-rain {
+  background: rgba(59, 130, 246, 0.16);
+  border-color: rgba(59, 130, 246, 0.28);
+  color: #93c5fd;
+}
+
+.hud-status-icon-badge.weather-snow {
+  background: rgba(224, 242, 254, 0.18);
+  border-color: rgba(224, 242, 254, 0.3);
+  color: #e0f2fe;
+}
+
+.hud-status-label {
+  color: var(--muted);
+}
+
+.hud-status-line strong {
+  color: var(--text);
+  font-weight: 400;
+}
+
 @media (max-width: 768px) {
   .title-bar {
     top: 16px;
@@ -115,6 +199,31 @@
 
   .time-display .date {
     font-size: 5px;
+  }
+
+  .hud-status-lines {
+    gap: 2px;
+    margin-top: 4px;
+  }
+
+  .hud-status-line {
+    gap: 4px;
+    font-size: 7px;
+    letter-spacing: 0.04em;
+  }
+
+  .hud-status-icon-badge {
+    width: 16px;
+    height: 16px;
+  }
+
+  .hud-status-icon {
+    width: 10px;
+    height: 10px;
+  }
+
+  .hud-status-label {
+    display: none;
   }
 
   .corner {

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import AnimatedLogo from '../../../components/AnimatedLogo';
+import { useTranslation } from '../../../contexts/LanguageContext';
 
 interface Props {
   onConnect: () => void;
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export default function WelcomeStep({ onConnect, onSimulation, onImport }: Props) {
+  const t = useTranslation();
   const fileRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
 
@@ -23,26 +25,23 @@ export default function WelcomeStep({ onConnect, onSimulation, onImport }: Props
   return (
     <div className="onboarding-step onboarding-welcome">
       <AnimatedLogo />
-      <h2>Your 3D Dashboard, controlled by Home Assistant</h2>
+      <h2>{t('onboarding.welcomeSubtitle')}</h2>
 
-      <p>
-        Control your lights, displays, and sensors through an interactive 3D model
-        of your home. This wizard will help you set everything up.
-      </p>
+      <p>{t('onboarding.welcomeBody')}</p>
 
       <div className="onboarding-welcome-actions">
         <button className="onboarding-btn primary" onClick={onConnect} disabled={importing}>
-          Connect to Home Assistant
+          {t('onboarding.connectHA')}
         </button>
         <button className="onboarding-btn simulation" onClick={onSimulation} disabled={importing}>
-          Try Simulation
+          {t('onboarding.trySimulation')}
         </button>
         <button
           className="onboarding-btn import"
           onClick={() => fileRef.current?.click()}
           disabled={importing}
         >
-          {importing ? 'Importing...' : 'Import Backup'}
+          {importing ? t('onboarding.importing') : t('onboarding.importBackup')}
         </button>
         <input
           ref={fileRef}
@@ -58,7 +57,7 @@ export default function WelcomeStep({ onConnect, onSimulation, onImport }: Props
 
       {importing && (
         <p style={{ color: 'var(--muted)', marginTop: 12 }}>
-          Restoring backup and testing connection...
+          {t('onboarding.restoringBackup')}
         </p>
       )}
     </div>

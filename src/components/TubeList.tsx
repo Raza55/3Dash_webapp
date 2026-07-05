@@ -1,4 +1,5 @@
 import type { TubeConfig } from '../types';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface Props {
   tubes: TubeConfig[];
@@ -8,43 +9,44 @@ interface Props {
   onDuplicate: (idx: number) => void;
 }
 
-const DIR_LABELS: Record<string, string> = {
-  left: '\u2190 Left',
-  right: '\u2192 Right',
-  top: '\u2191 Top',
-  bottom: '\u2193 Bottom',
-};
-
 export default function TubeList({ tubes, selectedIdx, onSelect, onDelete, onDuplicate }: Props) {
+  const t = useTranslation();
+  const dirLabels: Record<string, string> = {
+    left: `\u2190 ${t('common.left')}`,
+    right: `\u2192 ${t('common.right')}`,
+    top: `\u2191 ${t('common.top')}`,
+    bottom: `\u2193 ${t('common.bottom')}`,
+  };
+
   if (tubes.length === 0) {
     return (
       <div className="list-empty">
-        No tubes configured.<br />
-        Click <strong>Add Tube</strong> to create one.
+        {t('list.noTubes')}<br />
+        <span dangerouslySetInnerHTML={{ __html: t('list.clickAddTube') }} />
       </div>
     );
   }
 
   return (
     <>
-      {tubes.map((t, i) => (
+      {tubes.map((tube, i) => (
         <div
-          key={t.id}
+          key={tube.id}
           className={`light-item${selectedIdx === i ? ' selected' : ''}`}
           onClick={() => onSelect(i)}
         >
-          <div className="light-item-icon" style={{ color: t.lines[0]?.color || '#888' }}>
+          <div className="light-item-icon" style={{ color: tube.lines[0]?.color || '#888' }}>
             &#x2503;
           </div>
           <div className="light-item-info">
-            <div className="light-item-name">{t.label || t.id}</div>
+            <div className="light-item-name">{tube.label || tube.id}</div>
             <div className="light-item-meta">
-              {DIR_LABELS[t.originDirection] || t.originDirection} &middot; {t.lines.length} line{t.lines.length !== 1 ? 's' : ''}
+              {dirLabels[tube.originDirection] || tube.originDirection} &middot; {tube.lines.length} {tube.lines.length === 1 ? t('list.line') : t('list.lines')}
             </div>
           </div>
           <button
             className="light-item-dup"
-            title="Duplicate"
+            title={t('common.duplicate')}
             onClick={(e) => {
               e.stopPropagation();
               onDuplicate(i);

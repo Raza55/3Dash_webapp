@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect, useRef, ty
 import { isDaytime } from '../babylon/SunController';
 import { getSetting, getSettings, updateSettings } from '../services/settingsStore';
 import type { AppSettings } from '../services/settingsStore';
+import { SYSTEM_LOCATION } from '../constants/location';
 
 type ThemeMode = 'dark' | 'light' | 'auto' | 'system';
 type ResolvedTheme = 'dark' | 'light';
@@ -176,16 +177,13 @@ const ThemeContext = createContext<ThemeValue>({
   refreshAppearance: () => {},
 });
 
-const DEFAULT_LAT = 43.6077;
-const DEFAULT_LNG = 3.8766;
-
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeMode>(
     () => getSetting('appearance').theme,
   );
 
   const [resolved, setResolved] = useState<ResolvedTheme>(() => {
-    if (theme === 'auto') return isDaytime(DEFAULT_LAT, DEFAULT_LNG) ? 'light' : 'dark';
+    if (theme === 'auto') return isDaytime(SYSTEM_LOCATION.latitude, SYSTEM_LOCATION.longitude) ? 'light' : 'dark';
     if (theme === 'system') return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     return theme as ResolvedTheme;
   });
@@ -203,7 +201,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const updateAutoTheme = useCallback((minutes?: number) => {
     if (themeRef.current !== 'auto') return;
-    const day = isDaytime(DEFAULT_LAT, DEFAULT_LNG, minutes);
+    const day = isDaytime(SYSTEM_LOCATION.latitude, SYSTEM_LOCATION.longitude, minutes);
     setResolved(day ? 'light' : 'dark');
   }, []);
 
@@ -214,7 +212,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // When theme mode changes, resolve immediately
   useEffect(() => {
     if (theme === 'auto') {
-      setResolved(isDaytime(DEFAULT_LAT, DEFAULT_LNG) ? 'light' : 'dark');
+      setResolved(isDaytime(SYSTEM_LOCATION.latitude, SYSTEM_LOCATION.longitude) ? 'light' : 'dark');
     } else if (theme === 'system') {
       setResolved(window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     } else {

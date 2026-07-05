@@ -4,6 +4,7 @@ import { generateUUID } from '../utils/uuid';
 import LucideIcon from './SidePanel/cards/LucideIcon';
 import { FormPanel, AccordionSection } from './FormPanel';
 import EntityPicker, { type HAEntityOption } from './EntityPicker';
+import { useTranslation } from '../contexts/LanguageContext';
 
 export interface TubePreviewInfo {
   config: TubeConfig;
@@ -20,30 +21,7 @@ interface Props {
   haEntities?: HAEntityOption[];
 }
 
-const DIRECTION_OPTIONS: { value: TubeOriginDirection; label: string }[] = [
-  { value: 'left', label: '\u2190 Left' },
-  { value: 'right', label: '\u2192 Right' },
-  { value: 'top', label: '\u2191 Top' },
-  { value: 'bottom', label: '\u2193 Bottom' },
-];
-
 const UNIT_OPTIONS: TubeInputUnit[] = ['b', 'kb', 'mb', 'gb', 'tb', 'B', 'kB', 'mB', 'gB', 'tB'];
-
-const PRESET_UNITS = [
-  { value: '', label: 'Network speed (bits/bytes)' },
-  { value: 'W', label: 'Watts (W)' },
-  { value: 'L', label: 'Liters (L)' },
-  { value: 'L/min', label: 'Liters/min (L/min)' },
-  { value: 'm³', label: 'Cubic meters (m³)' },
-  { value: 'm³/h', label: 'Cubic meters/h (m³/h)' },
-  { value: '°C', label: 'Celsius (°C)' },
-  { value: '%', label: 'Percent (%)' },
-  { value: 'A', label: 'Amps (A)' },
-  { value: 'V', label: 'Volts (V)' },
-  { value: 'Wh', label: 'Watt-hours (Wh)' },
-  { value: 'Pa', label: 'Pascals (Pa)' },
-  { value: 'custom', label: 'Custom...' },
-];
 
 function defaultLine(): TubeLineConfig {
   return { sensorId: '', color: '#00aaff' };
@@ -59,6 +37,7 @@ export default function TubeForm({
   onPreviewChange,
   haEntities = [],
 }: Props) {
+  const t = useTranslation();
   const [label, setLabel] = useState('');
   const [originDirection, setOriginDirection] = useState<TubeOriginDirection>('left');
   const [diameter, setDiameter] = useState(0.08);
@@ -67,6 +46,27 @@ export default function TubeForm({
   const [labelPosition, setLabelPosition] = useState(0.95);
   const [labelHeight, setLabelHeight] = useState(0.3);
   const [lines, setLines] = useState<TubeLineConfig[]>([defaultLine()]);
+  const directionOptions: { value: TubeOriginDirection; label: string }[] = [
+    { value: 'left', label: `\u2190 ${t('common.left')}` },
+    { value: 'right', label: `\u2192 ${t('common.right')}` },
+    { value: 'top', label: `\u2191 ${t('common.top')}` },
+    { value: 'bottom', label: `\u2193 ${t('common.bottom')}` },
+  ];
+  const presetUnits = [
+    { value: '', label: t('form.networkSpeed') },
+    { value: 'W', label: t('form.watts') },
+    { value: 'L', label: t('form.litres') },
+    { value: 'L/min', label: t('form.litresMin') },
+    { value: 'm³', label: t('form.cubicMeters') },
+    { value: 'm³/h', label: t('form.cubicMetersH') },
+    { value: '°C', label: t('form.celsius') },
+    { value: '%', label: t('form.percent') },
+    { value: 'A', label: t('form.amps') },
+    { value: 'V', label: t('form.volts') },
+    { value: 'Wh', label: t('form.wattHours') },
+    { value: 'Pa', label: t('form.pascals') },
+    { value: 'custom', label: t('form.custom') },
+  ];
 
   // Init form from editTube
   useEffect(() => {
@@ -161,10 +161,10 @@ export default function TubeForm({
   const footer = (
     <>
       <button className="btn btn-success" onClick={handleSave}>
-        &#10003; Save Tube
+        &#10003; {t('form.saveTube')}
       </button>
       <button className="btn btn-ghost" onClick={onClose}>
-        Cancel
+        {t('common.cancel')}
       </button>
     </>
   );
@@ -172,41 +172,41 @@ export default function TubeForm({
   return (
     <FormPanel
       open={open}
-      title={editTube ? 'Edit Tube' : 'Add Tube'}
+      title={editTube ? t('form.editTube') : t('form.addTube')}
       onClose={onClose}
       footer={footer}
     >
-      <AccordionSection title="Label" defaultOpen>
+      <AccordionSection title={t('form.label')} defaultOpen>
         <div className="field-group">
           <input
             type="text"
             className="field-input"
-            placeholder="e.g. Network Speed"
+            placeholder={t('placeholder.tubeLabel')}
             value={label}
             onChange={(e) => setLabel(e.target.value)}
           />
         </div>
       </AccordionSection>
 
-      <AccordionSection title="Origin Direction" defaultOpen>
+      <AccordionSection title={t('form.originDirection')} defaultOpen>
         <div className="field-group">
           <select
             className="field-input"
             value={originDirection}
             onChange={(e) => setOriginDirection(e.target.value as TubeOriginDirection)}
           >
-            {DIRECTION_OPTIONS.map(opt => (
+            {directionOptions.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
         </div>
       </AccordionSection>
 
-      <AccordionSection title="Tube Settings">
+      <AccordionSection title={t('form.tubeSettings')}>
         {([
-          { label: 'Diameter', value: diameter, set: setDiameter, min: 0.01, max: 0.5, step: 0.01 },
-          { label: 'Gap', value: gap, set: setGap, min: 0.05, max: 2, step: 0.05 },
-          { label: 'Font Size', value: fontSize, set: setFontSize, min: 12, max: 120, step: 2 },
+          { label: t('form.diameter'), value: diameter, set: setDiameter, min: 0.01, max: 0.5, step: 0.01 },
+          { label: t('form.gap'), value: gap, set: setGap, min: 0.05, max: 2, step: 0.05 },
+          { label: t('form.fontSize'), value: fontSize, set: setFontSize, min: 12, max: 120, step: 2 },
         ] as const).map(({ label: lbl, value, set, min, max, step }) => (
           <div key={lbl} className="tube-slider-group">
             <span className="tube-slider-label">{lbl}</span>
@@ -233,10 +233,10 @@ export default function TubeForm({
         ))}
       </AccordionSection>
 
-      <AccordionSection title="Label Positioning">
+      <AccordionSection title={t('form.labelPositioning')}>
         {([
-          { label: 'Position', value: labelPosition, set: setLabelPosition, min: 0, max: 1, step: 0.01 },
-          { label: 'Height', value: labelHeight, set: setLabelHeight, min: 0, max: 3, step: 0.05 },
+          { label: t('form.position'), value: labelPosition, set: setLabelPosition, min: 0, max: 1, step: 0.01 },
+          { label: t('form.height'), value: labelHeight, set: setLabelHeight, min: 0, max: 3, step: 0.05 },
         ] as const).map(({ label: lbl, value, set, min, max, step }) => (
           <div key={lbl} className="tube-slider-group">
             <span className="tube-slider-label">{lbl}</span>
@@ -263,9 +263,9 @@ export default function TubeForm({
         ))}
       </AccordionSection>
 
-      <AccordionSection title="Endpoint Position" defaultOpen>
+      <AccordionSection title={t('form.endpointPosition')} defaultOpen>
         <div className="placement-hint visible">
-          Drag the gizmo or adjust below.
+          {t('form.dragGizmoHint')}
         </div>
         {([
           { label: 'X', color: '#f87171', axis: 'x' as const },
@@ -293,9 +293,9 @@ export default function TubeForm({
         ))}
       </AccordionSection>
 
-      <AccordionSection title="Sensor Lines" defaultOpen>
+      <AccordionSection title={t('form.sensorLines')} defaultOpen>
         <button className="btn-inline" onClick={addLine} style={{ fontSize: '0.85em', alignSelf: 'flex-start' }}>
-          + Add Line
+          {t('form.addLine')}
         </button>
         {lines.map((line, i) => (
           <div key={i} className="tube-line-row" style={{ flexWrap: 'wrap' }}>
@@ -304,7 +304,7 @@ export default function TubeForm({
               className="tube-line-color"
               value={line.color}
               onChange={(e) => handleLineChange(i, 'color', e.target.value)}
-              title="Line color"
+              title={t('form.lineColorTitle')}
             />
             <div className="tube-line-sensor" style={{ flex: 1 }}>
               <EntityPicker
@@ -320,7 +320,7 @@ export default function TubeForm({
               <button
                 className="tube-line-remove"
                 onClick={() => removeLine(i)}
-                title="Remove line"
+                title={t('form.removeLineTitle')}
               >
                 &times;
               </button>
@@ -330,7 +330,7 @@ export default function TubeForm({
                 type="text"
                 className="field-input"
                 style={{ flex: 1 }}
-                placeholder="icon (e.g. Wifi)"
+                placeholder={t('placeholder.iconWifi')}
                 value={line.icon ?? ''}
                 onChange={(e) => handleLineChange(i, 'icon', e.target.value || '')}
               />
@@ -344,13 +344,13 @@ export default function TubeForm({
               )}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', marginTop: 4 }}>
-              <span style={{ fontSize: '0.75em', opacity: 0.6, whiteSpace: 'nowrap' }}>Unit</span>
+              <span style={{ fontSize: '0.75em', opacity: 0.6, whiteSpace: 'nowrap' }}>{t('form.unit')}</span>
               <select
                 className="field-input"
                 style={{ flex: 1 }}
                 value={
                   !line.displayUnit ? ''
-                    : PRESET_UNITS.some(p => p.value === line.displayUnit) ? line.displayUnit
+                    : presetUnits.some(p => p.value === line.displayUnit) ? line.displayUnit
                     : 'custom'
                 }
                 onChange={(e) => {
@@ -361,21 +361,21 @@ export default function TubeForm({
                     handleLineChange(i, 'displayUnit', v);
                   }
                 }}
-                title="Display unit"
+                title={t('form.unit3dLabelTitle')}
               >
-                {PRESET_UNITS.map(p => (
+                {presetUnits.map(p => (
                   <option key={p.value} value={p.value}>{p.label}</option>
                 ))}
               </select>
             </div>
-            {line.displayUnit && !PRESET_UNITS.some(p => p.value === line.displayUnit && p.value !== 'custom') && (
+            {line.displayUnit && !presetUnits.some(p => p.value === line.displayUnit && p.value !== 'custom') && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', marginTop: 4 }}>
-                <span style={{ fontSize: '0.75em', opacity: 0.6, whiteSpace: 'nowrap' }}>Custom unit</span>
+                <span style={{ fontSize: '0.75em', opacity: 0.6, whiteSpace: 'nowrap' }}>{t('form.customUnit')}</span>
                 <input
                   type="text"
                   className="field-input"
                   style={{ flex: 1 }}
-                  placeholder="e.g. dB, lux, ppm"
+                  placeholder={t('placeholder.customUnit')}
                   value={line.displayUnit ?? ''}
                   onChange={(e) => handleLineChange(i, 'displayUnit', e.target.value || '')}
                 />
@@ -383,25 +383,25 @@ export default function TubeForm({
             )}
             {!line.displayUnit && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', marginTop: 4 }}>
-                <span style={{ fontSize: '0.75em', opacity: 0.6, whiteSpace: 'nowrap' }}>Input</span>
+                <span style={{ fontSize: '0.75em', opacity: 0.6, whiteSpace: 'nowrap' }}>{t('form.input')}</span>
                 <select
                   className="field-input"
                   style={{ flex: 1 }}
                   value={line.inputUnit ?? 'b'}
                   onChange={(e) => handleLineChange(i, 'inputUnit', e.target.value)}
-                  title="Unit the sensor reports"
+                  title={t('form.sensorReportsTitle')}
                 >
                   {UNIT_OPTIONS.map(u => (
                     <option key={u} value={u}>{u}/s</option>
                   ))}
                 </select>
-                <span style={{ fontSize: '0.75em', opacity: 0.6, whiteSpace: 'nowrap' }}>Display</span>
+                <span style={{ fontSize: '0.75em', opacity: 0.6, whiteSpace: 'nowrap' }}>{t('form.display')}</span>
                 <select
                   className="field-input"
                   style={{ flex: 1 }}
                   value={line.displayBytes ? 'bytes' : 'bits'}
                   onChange={(e) => handleLineChange(i, 'displayBytes', e.target.value === 'bytes')}
-                  title="Unit shown on the 3D label"
+                  title={t('form.unit3dLabelTitle')}
                 >
                   <option value="bits">bits</option>
                   <option value="bytes">bytes</option>
@@ -409,7 +409,7 @@ export default function TubeForm({
               </div>
             )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', marginTop: 4 }}>
-              <span style={{ fontSize: '0.75em', opacity: 0.6, whiteSpace: 'nowrap' }}>Decimals</span>
+              <span style={{ fontSize: '0.75em', opacity: 0.6, whiteSpace: 'nowrap' }}>{t('form.decimals')}</span>
               <input
                 type="range"
                 className="pos-slider"
@@ -438,27 +438,27 @@ export default function TubeForm({
                   checked={!!line.particles}
                   onChange={(e) => handleLineChange(i, 'particles', e.target.checked)}
                 />
-                Particles
+                {t('form.particles')}
               </label>
               {line.particles && (
                 <>
-                  <span style={{ fontSize: '0.75em', opacity: 0.6, whiteSpace: 'nowrap' }}>Direction</span>
+                  <span style={{ fontSize: '0.75em', opacity: 0.6, whiteSpace: 'nowrap' }}>{t('form.direction')}</span>
                   <select
                     className="field-input"
                     style={{ flex: 1 }}
                     value={line.particleDirection ?? 'inward'}
                     onChange={(e) => handleLineChange(i, 'particleDirection', e.target.value)}
-                    title="Particle flow direction"
+                    title={t('form.particleDirectionTitle')}
                   >
-                    <option value="inward">Inward</option>
-                    <option value="outward">Outward</option>
+                    <option value="inward">{t('form.inward')}</option>
+                    <option value="outward">{t('form.outward')}</option>
                   </select>
                 </>
               )}
             </div>
             {line.particles && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', marginTop: 4 }}>
-                <span style={{ fontSize: '0.75em', opacity: 0.6, whiteSpace: 'nowrap' }}>Speed</span>
+                <span style={{ fontSize: '0.75em', opacity: 0.6, whiteSpace: 'nowrap' }}>{t('form.speed')}</span>
                 <input
                   type="range"
                   className="pos-slider"
@@ -479,7 +479,7 @@ export default function TubeForm({
                   value={line.particleSpeed ?? 1}
                   onChange={(e) => handleLineChange(i, 'particleSpeed', e.target.value)}
                 />
-                <span style={{ fontSize: '0.75em', opacity: 0.6, whiteSpace: 'nowrap' }}>Max value</span>
+                <span style={{ fontSize: '0.75em', opacity: 0.6, whiteSpace: 'nowrap' }}>{t('form.maxValue')}</span>
                 <input
                   type="number"
                   className="pos-num"
@@ -488,7 +488,7 @@ export default function TubeForm({
                   step={1}
                   value={line.particleMaxValue ?? 1000}
                   onChange={(e) => handleLineChange(i, 'particleMaxValue', e.target.value)}
-                  title="Sensor value at which particles reach max speed"
+                  title={t('form.particleMaxTitle')}
                 />
               </div>
             )}

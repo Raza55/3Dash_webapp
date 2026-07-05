@@ -1,14 +1,12 @@
 import type { AppConfig } from '../types';
 import type { AppSettings } from '../services/settingsStore';
+import { systemLocationWithNorthOffset } from '../constants/location';
 
 /**
  * Premade config for simulation mode.
  */
 export const SIMULATION_CONFIG: AppConfig = {
-  location: {
-    latitude: 43.6077,
-    longitude: 3.8766,
-  },
+  location: systemLocationWithNorthOffset(),
   lights: [
     {
       entityId: 'light.bedroom_roof',
@@ -346,6 +344,7 @@ export const SIMULATION_SETTINGS: AppSettings = {
   },
   misc: {
     panelRatio: null,
+    language: 'de-DE',
   },
 };
 

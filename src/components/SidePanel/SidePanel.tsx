@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import type { SidePanelConfig, SidePanelCard, HAState, CardLayout } from '../../types';
 import type { HALike } from '../../services/haWebSocket';
+import { useTranslation } from '../../contexts/LanguageContext';
 import CardGrid from './CardGrid';
 import './SidePanel.css';
 
@@ -27,6 +28,7 @@ interface Props {
 const PANEL_PADDING = 24; // 12px each side
 
 export default function SidePanel({ config, ha, cardStates, onSettingsOpen, panelSize, onPanelResize, editMode, onEditDone, onLayoutChange, onSetTemperature, onSetHvacMode, onCardEdit, onCardDelete, onCardAdd, onExitSimulation }: Props) {
+  const t = useTranslation();
   const innerRef = useRef<HTMLDivElement>(null);
   const gridWidth = panelSize - PANEL_PADDING;
   const [gridHeight, setGridHeight] = useState(200);
@@ -120,22 +122,22 @@ export default function SidePanel({ config, ha, cardStates, onSettingsOpen, pane
           {editMode ? (
             <>
               <button className="side-panel-add-btn" onClick={onCardAdd}>
-                + Add Card
+                {t('cards.addCard')}
               </button>
               <button className="side-panel-done-btn" onClick={onEditDone}>
-                Done
+                {t('cards.done')}
               </button>
             </>
           ) : (
             <>
               {onSettingsOpen && (
                 <button className="side-panel-settings-btn" onClick={onSettingsOpen}>
-                  &#9881; Settings
+                  &#9881; {t('cards.settings')}
                 </button>
               )}
               {onExitSimulation && (
                 <button className="side-panel-exit-sim-btn" onClick={onExitSimulation}>
-                  Exit Simulation
+                  {t('cards.exitSimulation')}
                 </button>
               )}
             </>

@@ -1,8 +1,10 @@
 export interface WeatherData {
+  temperature_2m?: number;
   weather_code: number;
   cloud_cover: number;
   rain: number;
   snowfall: number;
+  is_day?: number;
 }
 
 // WMO weather codes for precipitation types
@@ -18,17 +20,25 @@ export function isSnowing(code: number): boolean {
 }
 
 // Client-side cache (10 min TTL, same as old server cache)
-let cache: { data: WeatherData; ts: number } | null = null;
+let cache: { data: WeatherData; latitude: number; longitude: number; ts: number } | null = null;
 const CACHE_TTL = 600_000;
+const LOCATION_EPSILON = 0.0001;
 
 export async function fetchWeather(latitude: number, longitude: number): Promise<WeatherData> {
-  if (cache && Date.now() - cache.ts < CACHE_TTL) return cache.data;
+  if (
+    cache &&
+    Math.abs(cache.latitude - latitude) < LOCATION_EPSILON &&
+    Math.abs(cache.longitude - longitude) < LOCATION_EPSILON &&
+    Date.now() - cache.ts < CACHE_TTL
+  ) {
+    return cache.data;
+  }
 
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=weather_code,cloud_cover,rain,snowfall`;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code,cloud_cover,rain,snowfall,is_day&timezone=Europe%2FBerlin`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Open-Meteo HTTP ${res.status}`);
   const json = await res.json();
   const data: WeatherData = json.current;
-  cache = { data, ts: Date.now() };
+  cache = { data, latitude, longitude, ts: Date.now() };
   return data;
 }

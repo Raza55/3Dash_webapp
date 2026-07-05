@@ -18,6 +18,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { LightConfig, LightGroup } from '../types';
+import { useTranslation } from '../contexts/LanguageContext';
 
 const TYPE_ICONS: Record<string, string> = {
   toggle: '\u{1F50C}',
@@ -30,6 +31,7 @@ const TYPE_ICONS: Record<string, string> = {
 const SHAPE_ICONS: Record<string, string> = {
   sphere: '\u25CF',
   cube: '\u25A0',
+  ellipsoid: '\u2B2D',
 };
 
 interface Props {
@@ -70,6 +72,7 @@ function SortableLightItem({
   onDelete: () => void;
   onDuplicate: () => void;
 }) {
+  const t = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: lightSortId(globalIdx),
   });
@@ -103,7 +106,7 @@ function SortableLightItem({
       </div>
       <button
         className="light-item-dup"
-        title="Duplicate"
+        title={t('common.duplicate')}
         onClick={(e) => { e.stopPropagation(); onDuplicate(); }}
       >
         ⧉
@@ -156,6 +159,7 @@ function GroupHeader({
   onRename: (name: string) => void;
   onDelete: () => void;
 }) {
+  const t = useTranslation();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(group.name);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -203,7 +207,7 @@ function GroupHeader({
       <div className="group-actions">
         <button
           className="group-action-btn"
-          title="Rename"
+          title={t('list.rename')}
           onClick={startEdit}
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -212,7 +216,7 @@ function GroupHeader({
         </button>
         <button
           className="group-action-btn"
-          title="Delete group"
+          title={t('list.deleteGroup')}
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -257,6 +261,7 @@ export default function LightList({
   onRenameGroup,
   onDeleteGroup,
 }: Props) {
+  const t = useTranslation();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -340,8 +345,8 @@ export default function LightList({
   if (lights.length === 0 && !hasGroups) {
     return (
       <div className="list-empty">
-        No lights configured.<br />
-        Click <strong>Add Light</strong> to place one.
+        {t('list.noLights')}<br />
+        <span dangerouslySetInnerHTML={{ __html: t('list.clickAddLight') }} />
       </div>
     );
   }
@@ -384,14 +389,14 @@ export default function LightList({
             >
               <polyline points="6 9 12 15 18 9" />
             </svg>
-            <span className="group-name">Ungrouped</span>
+            <span className="group-name">{t('list.ungrouped')}</span>
             <span className="group-count">{ungrouped.length}</span>
           </div>
           {!collapsed['__ungrouped__'] && (
             <DroppableGroupBody groupId="__ungrouped__">
               <SortableContext items={ungroupedSortIds} strategy={verticalListSortingStrategy}>
                 {ungrouped.length > 0 ? renderItems(ungrouped) : (
-                  <div className="group-drop-placeholder">Drag lights here</div>
+                  <div className="group-drop-placeholder">{t('list.dragLightsHere')}</div>
                 )}
               </SortableContext>
             </DroppableGroupBody>
@@ -425,7 +430,7 @@ export default function LightList({
               <DroppableGroupBody groupId={g.id}>
                 <SortableContext items={groupSortIds} strategy={verticalListSortingStrategy}>
                   {indices.length > 0 ? renderItems(indices) : (
-                    <div className="group-drop-placeholder">Drag lights here</div>
+                    <div className="group-drop-placeholder">{t('list.dragLightsHere')}</div>
                   )}
                 </SortableContext>
               </DroppableGroupBody>
@@ -437,9 +442,9 @@ export default function LightList({
       {/* Add group button */}
       <button
         className="add-group-btn"
-        onClick={() => onAddGroup('New Group')}
+        onClick={() => onAddGroup(t('editor.newGroup'))}
       >
-        + Add Group
+        {t('list.addGroup')}
       </button>
 
       {/* Drag overlay */}

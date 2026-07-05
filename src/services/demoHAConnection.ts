@@ -1,4 +1,4 @@
-import type { HAState, LightConfig, LightType } from '../types';
+import type { BlindConfig, HAState, LightConfig, LightType } from '../types';
 import type { HACallbacks } from './haWebSocket';
 import { isSimulationActive } from '../contexts/SimulationModeContext';
 
@@ -17,7 +17,7 @@ function persistStates(states: Map<string, HAState>): void {
   const obj: Record<string, HAState> = {};
   for (const [id, s] of states) {
     // Only persist light/switch entities, not sensors
-    if (id.startsWith('light.') || id.startsWith('switch.')) {
+    if (id.startsWith('light.') || id.startsWith('switch.') || id.startsWith('cover.') || id.startsWith('media_player.')) {
       obj[id] = s;
     }
   }
@@ -79,7 +79,7 @@ export class DemoHAConnection {
   }
 
   /** Bootstrap demo states from the loaded config entity IDs. */
-  start(lightConfigs: LightConfig[], sensorEntityIds: string[]): void {
+  start(lightConfigs: LightConfig[], sensorEntityIds: string[], blindConfigs: BlindConfig[] = []): void {
     if (this.disposed) return;
 
     const persisted = loadPersistedStates();
@@ -91,6 +91,14 @@ export class DemoHAConnection {
         entity_id: lc.entityId,
         state: 'off',
         attributes: { brightness: 0 },
+      });
+    }
+
+    for (const bc of blindConfigs) {
+      this.states.set(bc.entityId, persisted[bc.entityId] ?? {
+        entity_id: bc.entityId,
+        state: 'closed',
+        attributes: { current_position: 0, current_cover_position: 0 },
       });
     }
 
@@ -118,6 +126,21 @@ export class DemoHAConnection {
     };
     for (const id of sensorEntityIds) {
       const defaults = sensorDefaults[id];
+      if (id.startsWith('media_player.')) {
+        this.states.set(id, persisted[id] ?? {
+          entity_id: id,
+          state: 'playing',
+          attributes: {
+            app_name: 'Netflix',
+            media_title: 'Demo Movie',
+            media_artist: 'Living Room TV',
+            source: 'Netflix',
+            source_list: ['HDMI 1', 'Netflix', 'YouTube', 'Spotify'],
+            volume_level: 0.36,
+          },
+        });
+        continue;
+      }
       this.states.set(id, {
         entity_id: id,
         state: defaults?.state ?? '0',
@@ -171,6 +194,49 @@ export class DemoHAConnection {
       } else if (service === 'set_hvac_mode' && data?.hvac_mode !== undefined) {
         attrs.hvac_mode = data.hvac_mode;
         this.updateState(entityId, data.hvac_mode as string, attrs);
+      }
+      return;
+    }
+
+    if (domain === 'cover') {
+      const current = this.states.get(entityId);
+      const attrs = { ...(current?.attributes ?? {}) };
+      if (service === 'open_cover') {
+        this.updateState(entityId, 'open', { ...attrs, current_position: 100, current_cover_position: 100 });
+      } else if (service === 'close_cover') {
+        this.updateState(entityId, 'closed', { ...attrs, current_position: 0, current_cover_position: 0 });
+      } else if (service === 'set_cover_position') {
+        const next = Math.max(0, Math.min(100, Number(data?.position ?? 0)));
+        this.updateState(entityId, next > 0 ? 'open' : 'closed', { ...attrs, current_position: next, current_cover_position: next });
+      } else if (service === 'stop_cover') {
+        this.updateState(entityId, current?.state ?? 'open', attrs);
+      }
+      return;
+    }
+
+    if (domain === 'media_player') {
+      const current = this.states.get(entityId);
+      const attrs = { ...(current?.attributes ?? {}) };
+      if (service === 'turn_on') {
+        this.updateState(entityId, 'playing', {
+          ...attrs,
+          app_name: attrs.app_name ?? 'Netflix',
+          media_title: attrs.media_title ?? 'Demo Movie',
+          source: attrs.source ?? 'Netflix',
+          source_list: attrs.source_list ?? ['HDMI 1', 'Netflix', 'YouTube', 'Spotify'],
+          volume_level: attrs.volume_level ?? 0.36,
+        });
+      } else if (service === 'turn_off') {
+        this.updateState(entityId, 'off', attrs);
+      } else if (service === 'media_play_pause') {
+        this.updateState(entityId, current?.state === 'playing' ? 'paused' : 'playing', attrs);
+      } else if (service === 'media_stop') {
+        this.updateState(entityId, 'idle', attrs);
+      } else if (service === 'volume_set') {
+        const volume = Math.max(0, Math.min(1, Number(data?.volume_level ?? attrs.volume_level ?? 0)));
+        this.updateState(entityId, current?.state ?? 'playing', { ...attrs, volume_level: volume });
+      } else if (service === 'select_source') {
+        this.updateState(entityId, current?.state ?? 'playing', { ...attrs, source: data?.source });
       }
       return;
     }

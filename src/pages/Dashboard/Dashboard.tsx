@@ -1,8 +1,10 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Animation, Camera, Color3, Color4, CubicEase, EasingFunction, ShadowGenerator, Tools, Vector3, type AbstractMesh, type Mesh, type Observer, type Scene } from '@babylonjs/core';
-import { createScene, setupSunShadows, type SceneContext } from '../../babylon/SceneManager';
+import { Crosshair, Image as ImageIcon, ImageOff } from 'lucide-react';
+import { Animation, Camera, Color3, Color4, CubicEase, EasingFunction, ShadowGenerator, Tools, Vector3, type AbstractMesh, type Mesh, type Observer, type Scene, type TransformNode } from '@babylonjs/core';
+import { CAMERA_CONTROL_SENSITIVITY, createScene, setupSunShadows, type SceneContext } from '../../babylon/SceneManager';
 import { loadModel, createShadowWalls, setTexturesEnabled, setSketchAppearance } from '../../babylon/ModelLoader';
+import { disposeImportedObject, loadImportedObject, type ImportedObjectLoadResult } from '../../babylon/ImportedObjectLoader';
 import { createEdgeOutline, type EdgeOutlineControls } from '../../babylon/EdgeOutline';
 import {
   createLightMesh,
@@ -19,7 +21,13 @@ import {
   setDisplayAnimation,
   type DisplayMeshMap,
 } from '../../babylon/DisplayMeshFactory';
-import { getConfig, updateConfig, getModelBlob } from '../../services/configApi';
+import {
+  createBlindMesh,
+  removeBlindMesh,
+  updateBlindState,
+  type BlindMeshMap,
+} from '../../babylon/BlindMeshFactory';
+import { getConfig, updateConfig, getModelBlob, getModelObjectBlob } from '../../services/configApi';
 import { getEntityCache, setEntityCache } from '../../services/entityCache';
 import type { HAEntityOption } from '../../components/EntityPicker';
 import { getSetting, updateSettings, type HomeViewPose } from '../../services/settingsStore';
@@ -29,15 +37,19 @@ import { useDemoMode } from '../../contexts/DemoModeContext';
 import { useSimulationMode } from '../../contexts/SimulationModeContext';
 import { useCameraControls } from '../../contexts/CameraControlsContext';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useTranslation } from '../../contexts/LanguageContext';
 import { miredToKelvin, kelvinToRGB } from '../../utils/color';
 import { updateSunPosition, minutesToLabel } from '../../babylon/SunController';
 import { createWeatherEffects, type WeatherEffectsContext } from '../../babylon/WeatherEffects';
 import { fetchWeather, type WeatherData } from '../../services/weatherApi';
 import { showGroundGrid, hideGroundGrid, syncGridColors, disposeGroundGrid, createModelShadow } from '../../babylon/GroundGrid';
-import { createTubeMeshes, updateTubeValue, disposeAllTubes, setTubeTheme, type TubeMap } from '../../babylon/TubeMeshFactory';
+import { createTubeMeshes, updateTubeEntryValue, disposeAllTubes, setTubeTheme, type TubeMap } from '../../babylon/TubeMeshFactory';
+import { createSceneScaleRoot, getModelScale } from '../../babylon/SceneScale';
+import { SYSTEM_LOCATION, systemLocationWithNorthOffset } from '../../constants/location';
 import HUD from '../../components/HUD';
 import LightModal from '../../components/LightModal';
 import RemoteModal from '../../components/RemoteModal';
+import BlindModal from '../../components/BlindModal';
 import DisplayModal from '../../components/DisplayModal';
 import DebugPanel from '../../components/DebugPanel';
 import SidePanel from '../../components/SidePanel/SidePanel';
@@ -50,18 +62,27 @@ import type { AppConfig, DisplayConfig, LightConfig, RemoteButton, HAState, Card
 import './Dashboard.css';
 
 const LONG_PRESS_MS = 500;
+const LIGHT_INTENSITY_BASE = 0.8;
+const MIN_ON_LIGHT_FACTOR = 0.08;
+const MIN_ON_BULB_GLOW = 0.22;
 
 export default function Dashboard() {
   const { demoMode } = useDemoMode();
   const { simulationMode, setSimulationMode } = useSimulationMode();
   const camControls = useCameraControls();
   const { resolved: theme, updateAutoTheme } = useTheme();
+  const t = useTranslation();
   const navigate = useNavigate();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneCtxRef = useRef<SceneContext | null>(null);
   const meshMapRef = useRef<MeshMap>({});
+  const blindMeshMapRef = useRef<BlindMeshMap>({});
   const displayMeshMapRef = useRef<DisplayMeshMap>({});
   const tubeMapRef = useRef<TubeMap>({});
+  const panelEntityIdsRef = useRef<Set<string>>(new Set());
+  const displayIdsByEntityRef = useRef<Map<string, string[]>>(new Map());
+  const tubeIdsBySensorRef = useRef<Map<string, string[]>>(new Map());
+  const entityScaleRootRef = useRef<TransformNode | null>(null);
   const haRef = useRef<HALike | null>(null);
   const configRef = useRef<AppConfig | null>(null);
   const lastStatesRef = useRef<Record<string, HAState>>({});
@@ -92,6 +113,11 @@ export default function Dashboard() {
   const [remoteModalLabel, setRemoteModalLabel] = useState('');
   const [remoteModalButtons, setRemoteModalButtons] = useState<RemoteButton[]>([]);
   const [remoteModalState, setRemoteModalState] = useState<HAState | null>(null);
+
+  const [blindModalVisible, setBlindModalVisible] = useState(false);
+  const [blindModalEntityId, setBlindModalEntityId] = useState<string | null>(null);
+  const [blindModalLabel, setBlindModalLabel] = useState('');
+  const [blindModalState, setBlindModalState] = useState<HAState | null>(null);
 
   const [displayModalVisible, setDisplayModalVisible] = useState(false);
   const [displayModalConfig, setDisplayModalConfig] = useState<DisplayConfig | null>(null);
@@ -132,11 +158,47 @@ export default function Dashboard() {
     () => localStorage.getItem('showTour') === 'true',
   );
 
+  const rebuildEntityIndexes = useCallback((config: AppConfig | null) => {
+    const panelEntityIds = new Set<string>();
+    const displayIdsByEntity = new Map<string, string[]>();
+    const tubeIdsBySensor = new Map<string, string[]>();
+
+    const addToIndex = (map: Map<string, string[]>, entityId: string, id: string) => {
+      const ids = map.get(entityId);
+      if (ids) ids.push(id);
+      else map.set(entityId, [id]);
+    };
+
+    for (const card of config?.sidePanel?.cards ?? []) {
+      panelEntityIds.add(card.entityId);
+      if (card.type === 'indicator' && card.climateEntityId) {
+        panelEntityIds.add(card.climateEntityId);
+      }
+    }
+
+    for (const display of config?.displays ?? []) {
+      for (const source of display.sources) {
+        addToIndex(displayIdsByEntity, source.entityId, display.id);
+      }
+    }
+
+    for (const tube of config?.tubes ?? []) {
+      for (const line of tube.lines) {
+        addToIndex(tubeIdsBySensor, line.sensorId, tube.id);
+      }
+    }
+
+    panelEntityIdsRef.current = panelEntityIds;
+    displayIdsByEntityRef.current = displayIdsByEntity;
+    tubeIdsBySensorRef.current = tubeIdsBySensor;
+  }, []);
+
   useEffect(() => {
     if (showTour) localStorage.removeItem('showTour');
   }, [showTour]);
   const modelMeshesRef = useRef<AbstractMesh[]>([]);
   const shadowCastersRef = useRef<AbstractMesh[]>([]);
+  const importedObjectResultsRef = useRef<Record<string, ImportedObjectLoadResult>>({});
   const edgeOutlineRef = useRef<EdgeOutlineControls | null>(null);
   const weatherRef = useRef<WeatherEffectsContext | null>(null);
   const pollWeatherRef = useRef<() => void>(() => {});
@@ -228,10 +290,8 @@ export default function Dashboard() {
       // Re-apply sun without cloud dimming
       const ctx = sceneCtxRef.current;
       if (ctx?.sunLight && ctx?.hemiLight) {
-        const lat = configRef.current?.location.latitude ?? 43.6077;
-        const lng = configRef.current?.location.longitude ?? 3.8766;
         const mins = sunLiveMode ? undefined : sliderValue;
-        updateSunPosition(ctx.sunLight, ctx.hemiLight, lat, lng, mins, northOffsetRef.current, 1);
+        updateSunPosition(ctx.sunLight, ctx.hemiLight, SYSTEM_LOCATION.latitude, SYSTEM_LOCATION.longitude, mins, northOffsetRef.current, 1);
       }
     }
   }, [sunLiveMode, sliderValue]);
@@ -339,9 +399,7 @@ export default function Dashboard() {
       setScrubberTime(minutesToLabel(mins));
       const ctx = sceneCtxRef.current;
       if (ctx?.sunLight && ctx?.hemiLight) {
-        const lat = configRef.current?.location.latitude ?? 43.6077;
-        const lng = configRef.current?.location.longitude ?? 3.8766;
-        updateSunPosition(ctx.sunLight, ctx.hemiLight, lat, lng, mins, northOffsetRef.current, cloudCoverFactorRef.current);
+        updateSunPosition(ctx.sunLight, ctx.hemiLight, SYSTEM_LOCATION.latitude, SYSTEM_LOCATION.longitude, mins, northOffsetRef.current, cloudCoverFactorRef.current);
       }
       updateAutoTheme(mins);
     },
@@ -356,9 +414,7 @@ export default function Dashboard() {
       const liveMin = now.getHours() * 60 + now.getMinutes();
       setSliderValue(liveMin);
       setScrubberTime(minutesToLabel(liveMin));
-      const lat = configRef.current?.location.latitude ?? 43.6077;
-      const lng = configRef.current?.location.longitude ?? 3.8766;
-      updateSunPosition(ctx.sunLight, ctx.hemiLight, lat, lng, undefined, northOffsetRef.current, cloudCoverFactorRef.current);
+      updateSunPosition(ctx.sunLight, ctx.hemiLight, SYSTEM_LOCATION.latitude, SYSTEM_LOCATION.longitude, undefined, northOffsetRef.current, cloudCoverFactorRef.current);
     }
   }, []);
 
@@ -370,17 +426,15 @@ export default function Dashboard() {
     // Immediately update sun
     const ctx = sceneCtxRef.current;
     if (ctx?.sunLight && ctx?.hemiLight) {
-      const lat = configRef.current?.location.latitude ?? 43.6077;
-      const lng = configRef.current?.location.longitude ?? 3.8766;
       const mins = sunLiveMode ? undefined : sliderValue;
-      updateSunPosition(ctx.sunLight, ctx.hemiLight, lat, lng, mins, degrees, cloudCoverFactorRef.current);
+      updateSunPosition(ctx.sunLight, ctx.hemiLight, SYSTEM_LOCATION.latitude, SYSTEM_LOCATION.longitude, mins, degrees, cloudCoverFactorRef.current);
     }
     // Debounced save to config
     if (northSaveTimerRef.current) clearTimeout(northSaveTimerRef.current);
     northSaveTimerRef.current = setTimeout(() => {
       const loc = configRef.current?.location;
       if (loc) {
-        const updatedLocation = { ...loc, northOffset: degrees };
+        const updatedLocation = systemLocationWithNorthOffset(degrees);
         if (configRef.current) configRef.current.location = updatedLocation;
         try { updateConfig({ location: updatedLocation }); } catch (err) {
           console.warn('[Config] Failed to save north offset:', err);
@@ -393,7 +447,17 @@ export default function Dashboard() {
     setEdgeMode(mode);
     updateSettings('render', { edgeMode: mode });
     edgeOutlineRef.current?.setEnabled(mode === 'enhanced' && !showTextures);
-  }, [showTextures]);
+    if (!showTextures) {
+      for (const mesh of modelMeshesRef.current) {
+        if (mode === 'classic') {
+          mesh.enableEdgesRendering();
+          mesh.edgesWidth = edgeWidth;
+        } else {
+          mesh.disableEdgesRendering();
+        }
+      }
+    }
+  }, [edgeWidth, showTextures]);
 
   const handleEdgeWidthChange = useCallback((width: number) => {
     setEdgeWidth(width);
@@ -408,7 +472,7 @@ export default function Dashboard() {
     updateSettings('render', { showTextures: enabled });
     const scene = sceneCtxRef.current?.scene;
     if (!scene) return;
-    setTexturesEnabled(scene, modelMeshesRef.current, enabled, edgeWidth);
+    setTexturesEnabled(scene, modelMeshesRef.current, enabled, edgeWidth, edgeMode === 'classic');
     edgeOutlineRef.current?.setEnabled(!enabled && edgeMode === 'enhanced');
   }, [edgeWidth, edgeMode]);
 
@@ -512,12 +576,14 @@ export default function Dashboard() {
       for (const pl of allLights) pl.setEnabled(true);
 
       const cfg = configRef.current?.lights.find((l) => l.entityId === entityId);
-      const haBrightness = (attrs.brightness ?? 255) / 255;
+      const haBrightness = Math.max(0, Math.min(1, (attrs.brightness ?? 255) / 255));
+      const lightBrightness = Math.max(haBrightness, MIN_ON_LIGHT_FACTOR);
+      const bulbGlow = Math.max(haBrightness, MIN_ON_BULB_GLOW);
       const multiplier = cfg?.brightness ?? 1;
       // Strip sub-lights share the total intensity; single lights get full intensity
       const perLightIntensity = isStrip
-        ? (haBrightness * 0.8 * multiplier) / allLights.length
-        : haBrightness * 0.8 * multiplier;
+        ? (lightBrightness * LIGHT_INTENSITY_BASE * multiplier) / allLights.length
+        : lightBrightness * LIGHT_INTENSITY_BASE * multiplier;
 
       // Determine color: remote mode > HA rgb_color > HA color_temp > config warmth > default warm white
       let col = new Color3(1, 0.9, 0.7);
@@ -556,11 +622,11 @@ export default function Dashboard() {
         pl.diffuse = col;
       }
 
-      mat.emissiveColor = new Color3(
-        col.r * haBrightness,
-        col.g * haBrightness,
-        col.b * haBrightness,
-      );
+      new Color3(
+        col.r * bulbGlow,
+        col.g * bulbGlow,
+        col.b * bulbGlow,
+      ).clampToRef(0, 1, mat.emissiveColor);
 
       updateLightsOnCount();
     },
@@ -672,20 +738,33 @@ export default function Dashboard() {
       if (simulationMode) {
         configRef.current = SIMULATION_CONFIG;
         setSidePanelConfig(SIMULATION_CONFIG.sidePanel);
+        rebuildEntityIndexes(SIMULATION_CONFIG);
       } else {
         try {
           const config = await getConfig();
           if (disposed) return;
-          configRef.current = config;
-          setSidePanelConfig(config.sidePanel);
+          const systemLocation = systemLocationWithNorthOffset(config.location?.northOffset);
+          const configWithSystemLocation = { ...config, location: systemLocation };
+          configRef.current = configWithSystemLocation;
+          setSidePanelConfig(configWithSystemLocation.sidePanel);
+          rebuildEntityIndexes(configWithSystemLocation);
           if (config.location.northOffset !== undefined) setNorthOffset(config.location.northOffset);
+          if (
+            config.location.latitude !== SYSTEM_LOCATION.latitude ||
+            config.location.longitude !== SYSTEM_LOCATION.longitude
+          ) {
+            updateConfig({ location: systemLocation });
+          }
         } catch (e) {
           console.warn('[Config] Failed to load:', e);
-          configRef.current = { location: { latitude: 43.6077, longitude: 3.8766 }, lights: [] };
+          configRef.current = { location: systemLocationWithNorthOffset(), lights: [] };
+          rebuildEntityIndexes(configRef.current);
         }
       }
       // HA settings now live exclusively in the settings store
       if (disposed) return;
+      const modelScale = getModelScale(configRef.current?.model);
+      entityScaleRootRef.current = createSceneScaleRoot(ctx.scene, modelScale);
 
       // Load 3D model
       let modelBlob: Blob | null;
@@ -714,6 +793,9 @@ export default function Dashboard() {
           showTextures: showTexturesAtLoad,
           sketchColor: renderAtLoad.sketchColor,
           sketchSpecular: renderAtLoad.sketchSpecular,
+          edgeRendering: renderAtLoad.edgeMode === 'classic',
+          modelScale,
+          objectOverrides: configRef.current?.model?.objectOverrides ?? [],
         });
         if (disposed) return;
 
@@ -766,9 +848,31 @@ export default function Dashboard() {
         setModelStatus('ready');
         setModelStatusColor('var(--green)');
 
+        // Load user-added model objects into the same scaled scene space.
+        const importedShadowCasters: AbstractMesh[] = [];
+        for (const object of configRef.current?.model?.importedObjects ?? []) {
+          const blob = await getModelObjectBlob(object.id);
+          if (!blob) continue;
+          try {
+            const loaded = await loadImportedObject(ctx.scene, blob, object, {
+              parent: entityScaleRootRef.current ?? undefined,
+              editor: false,
+            });
+            if (disposed) {
+              disposeImportedObject(loaded);
+              return;
+            }
+            importedObjectResultsRef.current[object.id] = loaded;
+            importedShadowCasters.push(...loaded.shadowCasters);
+          } catch (error) {
+            console.warn('[Dashboard] Failed to load imported object:', object.fileName, error);
+          }
+        }
+
         // Create invisible shadow wall meshes from config
-        const wallMeshes = createShadowWalls(ctx.scene, configRef.current?.shadowWalls || []);
-        const allCasters = [...result.shadowCasters, ...wallMeshes];
+        const wallMeshes = createShadowWalls(ctx.scene, configRef.current?.shadowWalls || [], entityScaleRootRef.current ?? undefined);
+        const modelCasters = [...result.shadowCasters, ...importedShadowCasters];
+        const allCasters = [...modelCasters, ...wallMeshes];
 
         shadowCastersRef.current = allCasters;
 
@@ -778,19 +882,25 @@ export default function Dashboard() {
         // Create light meshes with shadow-casting PointLights
         // Cap point-light shadow generators to avoid VRAM exhaustion
         // (each cube shadow map = 6 × 2048² ≈ 100 MB)
-        const MAX_POINT_SHADOWS = 6;
+        const MAX_POINT_SHADOWS = 4;
         let shadowCount = 0;
         const config = configRef.current!;
         config.lights.forEach((cfg) => {
           const canShadow = shadowCount < MAX_POINT_SHADOWS;
           const entry = createLightMesh(ctx.scene, cfg, cfg.entityId, {
             withPointLight: true,
-            shadowCasters: canShadow ? result.shadowCasters : undefined,
+            shadowCasters: canShadow ? modelCasters : undefined,
             shadowResolution: getSetting('render').pointShadowRes,
+            parent: entityScaleRootRef.current ?? undefined,
+            sceneScale: modelScale,
           });
           if (entry.shadowGen) shadowCount++;
           meshMapRef.current[cfg.entityId] = entry;
         });
+
+        for (const cfg of config.blinds || []) {
+          blindMeshMapRef.current[cfg.entityId] = createBlindMesh(ctx.scene, cfg, 0, entityScaleRootRef.current ?? undefined);
+        }
 
         // Freeze PointLight shadow maps after first render (static geometry)
         ctx.scene.onAfterRenderObservable.addOnce(() => {
@@ -800,7 +910,7 @@ export default function Dashboard() {
         // Create wall display meshes
         const displayConfigs = config.displays || [];
         for (const dc of displayConfigs) {
-          const entry = createDisplayMesh(ctx.scene, dc);
+          const entry = createDisplayMesh(ctx.scene, dc, entityScaleRootRef.current ?? undefined);
           if (dc.clickable) {
             entry.plane.isPickable = true;
             entry.plane.metadata = { displayId: dc.id };
@@ -813,7 +923,7 @@ export default function Dashboard() {
         // Create tube meshes
         const tubeConfigs = config.tubes || [];
         for (const tc of tubeConfigs) {
-          tubeMapRef.current[tc.id] = createTubeMeshes(ctx.scene, tc, ctx.glowLayer);
+          tubeMapRef.current[tc.id] = createTubeMeshes(ctx.scene, tc, ctx.glowLayer, entityScaleRootRef.current ?? undefined);
         }
 
         // Weather effects (rain/snow particles + cloud cover)
@@ -821,9 +931,7 @@ export default function Dashboard() {
         const pollWeather = async () => {
           if (!weatherEnabledRef.current) return;
           try {
-            const lat = configRef.current?.location.latitude ?? 43.6077;
-            const lng = configRef.current?.location.longitude ?? 3.8766;
-            const data = await fetchWeather(lat, lng);
+            const data = await fetchWeather(SYSTEM_LOCATION.latitude, SYSTEM_LOCATION.longitude);
             if (disposed || !weatherRef.current) return;
             setCurrentWeather(data);
             const ccf = weatherRef.current.updateWeather(data);
@@ -845,18 +953,27 @@ export default function Dashboard() {
       }
 
       // Pointer handlers: short click = toggle, long press = modal
-      // Also handles clickable display meshes (displayId metadata) and tube meshes (tubeId metadata).
+      // Also handles clickable display, blind, and tube meshes.
       let pressedDisplayId: string | null = null;
+      let pressedBlindId: string | null = null;
       let pressedTubeId: string | null = null;
 
       ctx.scene.onPointerDown = (evt, pickResult) => {
         if (evt.button > 0) return;
         if (!pickResult.hit || !pickResult.pickedMesh) return;
-        const meta = pickResult.pickedMesh.metadata as { entityId?: string; displayId?: string; tubeId?: string } | null;
+        const meta = pickResult.pickedMesh.metadata as { entityId?: string; displayId?: string; blindId?: string; tubeId?: string } | null;
 
         // Display click — immediate open, no long-press
         if (meta?.displayId) {
           pressedDisplayId = meta.displayId;
+          pressStartX = evt.clientX;
+          pressStartY = evt.clientY;
+          return;
+        }
+
+        // Blind click — immediate open, no long-press
+        if (meta?.blindId) {
+          pressedBlindId = meta.blindId;
           pressStartX = evt.clientX;
           pressStartY = evt.clientY;
           return;
@@ -890,6 +1007,17 @@ export default function Dashboard() {
             openDisplayModal(pressedDisplayId);
           }
           pressedDisplayId = null;
+          return;
+        }
+
+        // Handle blind tap
+        if (pressedBlindId) {
+          const dx = _evt.clientX - pressStartX;
+          const dy = _evt.clientY - pressStartY;
+          if (dx * dx + dy * dy <= MOVE_THRESHOLD * MOVE_THRESHOLD) {
+            openBlindModal(pressedBlindId);
+          }
+          pressedBlindId = null;
           return;
         }
 
@@ -953,6 +1081,13 @@ export default function Dashboard() {
             pressedDisplayId = null;
           }
         }
+        if (pressedBlindId) {
+          const dx = _evt.clientX - pressStartX;
+          const dy = _evt.clientY - pressStartY;
+          if (dx * dx + dy * dy > MOVE_THRESHOLD * MOVE_THRESHOLD) {
+            pressedBlindId = null;
+          }
+        }
         if (pressedTubeId) {
           const dx = _evt.clientX - pressStartX;
           const dy = _evt.clientY - pressStartY;
@@ -969,8 +1104,8 @@ export default function Dashboard() {
             pressedEntity = null;
           }
         }
-        const meshMeta = pickResult.pickedMesh?.metadata as { entityId?: string; displayId?: string; tubeId?: string } | null;
-        if (pickResult.hit && (meshMeta?.entityId || meshMeta?.displayId || meshMeta?.tubeId)) {
+        const meshMeta = pickResult.pickedMesh?.metadata as { entityId?: string; displayId?: string; blindId?: string; tubeId?: string } | null;
+        if (pickResult.hit && (meshMeta?.entityId || meshMeta?.displayId || meshMeta?.blindId || meshMeta?.tubeId)) {
           canvas!.style.cursor = 'pointer';
         } else {
           canvas!.style.cursor = 'default';
@@ -990,10 +1125,17 @@ export default function Dashboard() {
       Object.keys(meshMapRef.current).forEach((id) =>
         removeLightMesh(meshMapRef.current, id),
       );
+      Object.keys(blindMeshMapRef.current).forEach((id) =>
+        removeBlindMesh(blindMeshMapRef.current, id),
+      );
       Object.keys(displayMeshMapRef.current).forEach((id) =>
         removeDisplayMesh(displayMeshMapRef.current, id),
       );
       disposeAllTubes(tubeMapRef.current);
+      for (const result of Object.values(importedObjectResultsRef.current)) {
+        disposeImportedObject(result);
+      }
+      importedObjectResultsRef.current = {};
       if (weatherIntervalRef) clearInterval(weatherIntervalRef);
       weatherRef.current?.dispose();
       weatherRef.current = null;
@@ -1029,9 +1171,11 @@ export default function Dashboard() {
       onStateChanged: (entityId: string, state: HAState) => {
         stopPendingFeedback(entityId);
         if (meshMapRef.current[entityId]) applyLightState(entityId, state);
+        if (blindMeshMapRef.current[entityId]) updateBlindState(blindMeshMapRef.current[entityId], state);
         if (entityId === modalEntityIdRef.current) setModalState(state);
         if (entityId === modalDoubleTapEntityIdRef.current) setModalDoubleTapState(state);
         if (entityId === remoteModalEntityIdRef.current) setRemoteModalState(state);
+        if (entityId === blindModalEntityIdRef.current) setBlindModalState(state);
 
         // Mode sensor changed → re-apply color to the associated remote light
         if (modeSensorToLight[entityId]) {
@@ -1040,20 +1184,20 @@ export default function Dashboard() {
           applyRemoteMode(lightId, state.state);
         }
 
-        const panelEntities: string[] = [];
-        for (const c of config.sidePanel?.cards ?? []) {
-          panelEntities.push(c.entityId);
-          if (c.type === 'indicator' && c.climateEntityId) panelEntities.push(c.climateEntityId);
-        }
-        if (panelEntities.includes(entityId)) {
+        if (panelEntityIdsRef.current.has(entityId)) {
           setCardStates(prev => ({ ...prev, [entityId]: state }));
         }
-        // Update tube labels referencing this sensor
-        updateTubeValue(tubeMapRef.current, entityId, state.state);
-        // Update wall displays referencing this entity
+
         lastStatesRef.current[entityId] = state;
-        for (const entry of Object.values(displayMeshMapRef.current)) {
-          if (entry.config.sources.some((s) => s.entityId === entityId)) {
+        // Update tube labels referencing this sensor.
+        for (const tubeId of tubeIdsBySensorRef.current.get(entityId) ?? []) {
+          const entry = tubeMapRef.current[tubeId];
+          if (entry) updateTubeEntryValue(entry, entityId, state.state);
+        }
+        // Update wall displays referencing this entity.
+        for (const displayId of displayIdsByEntityRef.current.get(entityId) ?? []) {
+          const entry = displayMeshMapRef.current[displayId];
+          if (entry) {
             updateDisplayTexture(entry, lastStatesRef.current);
             setDisplayAnimation(entry, resolveDisplayAnimation(entry.config, lastStatesRef.current));
           }
@@ -1070,16 +1214,12 @@ export default function Dashboard() {
             .map(s => ({ entity_id: s.entity_id, friendly_name: s.attributes.friendly_name as string | undefined }))
             .sort((a, b) => a.entity_id.localeCompare(b.entity_id)),
         );
-        const panelEntities = new Set<string>();
-        for (const c of config.sidePanel?.cards ?? []) {
-          panelEntities.add(c.entityId);
-          if (c.type === 'indicator' && c.climateEntityId) panelEntities.add(c.climateEntityId);
-        }
         const newCardStates: Record<string, HAState> = {};
         states.forEach((state) => {
           lastStatesRef.current[state.entity_id] = state;
           if (meshMapRef.current[state.entity_id]) applyLightState(state.entity_id, state);
-          if (panelEntities.has(state.entity_id)) newCardStates[state.entity_id] = state;
+          if (blindMeshMapRef.current[state.entity_id]) updateBlindState(blindMeshMapRef.current[state.entity_id], state);
+          if (panelEntityIdsRef.current.has(state.entity_id)) newCardStates[state.entity_id] = state;
         });
         if (Object.keys(newCardStates).length > 0) {
           setCardStates(prev => ({ ...prev, ...newCardStates }));
@@ -1093,7 +1233,10 @@ export default function Dashboard() {
         }
         // Update all tube labels with initial state
         for (const state of states) {
-          updateTubeValue(tubeMapRef.current, state.entity_id, state.state);
+          for (const tubeId of tubeIdsBySensorRef.current.get(state.entity_id) ?? []) {
+            const entry = tubeMapRef.current[tubeId];
+            if (entry) updateTubeEntryValue(entry, state.entity_id, state.state);
+          }
         }
         // Update all wall display textures with initial state
         for (const entry of Object.values(displayMeshMapRef.current)) {
@@ -1124,7 +1267,7 @@ export default function Dashboard() {
           if (!sensorIds.includes(line.sensorId)) sensorIds.push(line.sensorId);
         }
       }
-      demo.start(config.lights, sensorIds);
+      demo.start(config.lights, sensorIds, config.blinds || []);
     } else {
       const haSettings = getSetting('connection').haSettings;
       const ha = new HAConnection(
@@ -1160,6 +1303,8 @@ export default function Dashboard() {
   modalDoubleTapEntityIdRef.current = modalDoubleTapEntityId;
   const remoteModalEntityIdRef = useRef<string | null>(null);
   remoteModalEntityIdRef.current = remoteModalEntityId;
+  const blindModalEntityIdRef = useRef<string | null>(null);
+  blindModalEntityIdRef.current = blindModalEntityId;
 
   const openModal = useCallback((entityId: string) => {
     const config = configRef.current;
@@ -1235,6 +1380,62 @@ export default function Dashboard() {
     setRemoteModalEntityId(null);
   }, []);
 
+  const openBlindModal = useCallback((blindId: string) => {
+    const config = configRef.current;
+    if (!config) return;
+    const cfg = (config.blinds || []).find((b) => b.id === blindId || b.entityId === blindId);
+    if (!cfg) return;
+    setBlindModalEntityId(cfg.entityId);
+    setBlindModalLabel(cfg.label || cfg.entityId.split('.')[1]?.replace(/_/g, ' ') || cfg.entityId);
+    setBlindModalState(lastStatesRef.current[cfg.entityId] || null);
+    setBlindModalVisible(true);
+  }, []);
+
+  const handleBlindModalClose = useCallback(() => {
+    setBlindModalVisible(false);
+    setBlindModalEntityId(null);
+  }, []);
+
+  const handleBlindOpen = useCallback((entityId: string) => {
+    haRef.current?.callService('cover', 'open_cover', entityId);
+  }, []);
+
+  const handleBlindClose = useCallback((entityId: string) => {
+    haRef.current?.callService('cover', 'close_cover', entityId);
+  }, []);
+
+  const handleBlindStop = useCallback((entityId: string) => {
+    haRef.current?.callService('cover', 'stop_cover', entityId);
+  }, []);
+
+  const handleBlindSetPosition = useCallback((entityId: string, position: number) => {
+    haRef.current?.callService('cover', 'set_cover_position', entityId, { position });
+  }, []);
+
+  const handleMediaTurnOn = useCallback((entityId: string) => {
+    haRef.current?.callService('media_player', 'turn_on', entityId);
+  }, []);
+
+  const handleMediaTurnOff = useCallback((entityId: string) => {
+    haRef.current?.callService('media_player', 'turn_off', entityId);
+  }, []);
+
+  const handleMediaPlayPause = useCallback((entityId: string) => {
+    haRef.current?.callService('media_player', 'media_play_pause', entityId);
+  }, []);
+
+  const handleMediaStop = useCallback((entityId: string) => {
+    haRef.current?.callService('media_player', 'media_stop', entityId);
+  }, []);
+
+  const handleMediaSetVolume = useCallback((entityId: string, volume: number) => {
+    haRef.current?.callService('media_player', 'volume_set', entityId, { volume_level: volume });
+  }, []);
+
+  const handleMediaSelectSource = useCallback((entityId: string, source: string) => {
+    haRef.current?.callService('media_player', 'select_source', entityId, { source });
+  }, []);
+
   const handleRemoteButtonPress = useCallback((entityId: string) => {
     const ha = haRef.current;
     if (!ha?.isConnected) return;
@@ -1301,6 +1502,8 @@ export default function Dashboard() {
         stripConfig,
         singleRange,
         shadowResolution: getSetting('render').pointShadowRes,
+        parent: entityScaleRootRef.current ?? undefined,
+        sceneScale: getModelScale(config.model),
       });
       if (entry.shadowGen) shadowCount++;
       meshMapRef.current[cfg.entityId] = entry;
@@ -1392,6 +1595,60 @@ export default function Dashboard() {
     });
   }, [defaultTarget, computeIdealRadius]);
 
+  const recenterModelView = useCallback(() => {
+    const ctx = sceneCtxRef.current;
+    if (!ctx || !defaultTarget || homingRef.current) return;
+    const { camera, scene } = ctx;
+    const fps = 60;
+    const frames = 45;
+
+    homingRef.current = true;
+    camera.detachControl();
+
+    const ease = new CubicEase();
+    ease.setEasingMode(EasingFunction.EASINGMODE_EASEINOUT);
+
+    const makeAnim = (prop: string, from: number, to: number) => {
+      const a = new Animation(`recenter_${prop}`, prop, fps, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CONSTANT);
+      a.setKeys([{ frame: 0, value: from }, { frame: frames, value: to }]);
+      a.setEasingFunction(ease);
+      return a;
+    };
+
+    const targetRadius = computeIdealRadius();
+    const targetAlpha = Tools.ToRadians(270);
+    const targetBeta = Tools.ToRadians(0.5);
+    const targetPos = new Vector3(defaultTarget.x, defaultTarget.y, defaultTarget.z);
+
+    const EPS = 0.002;
+    if (
+      Math.abs(camera.radius - targetRadius) < EPS &&
+      Math.abs(camera.alpha - targetAlpha) < EPS &&
+      Math.abs(camera.beta - targetBeta) < EPS &&
+      Vector3.Distance(camera.target, targetPos) < EPS
+    ) {
+      homingRef.current = false;
+      camera.attachControl(true);
+      return;
+    }
+
+    const targetAnim = new Animation('recenter_target', 'target', fps, Animation.ANIMATIONTYPE_VECTOR3, Animation.ANIMATIONLOOPMODE_CONSTANT);
+    targetAnim.setKeys([{ frame: 0, value: camera.target.clone() }, { frame: frames, value: targetPos }]);
+    targetAnim.setEasingFunction(ease);
+
+    camera.animations = [
+      makeAnim('radius', camera.radius, targetRadius),
+      makeAnim('alpha', camera.alpha, targetAlpha),
+      makeAnim('beta', camera.beta, targetBeta),
+      targetAnim,
+    ];
+
+    scene.beginAnimation(camera, 0, frames, false, 1, () => {
+      camera.attachControl(true);
+      homingRef.current = false;
+    });
+  }, [defaultTarget, computeIdealRadius]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1406,8 +1663,9 @@ export default function Dashboard() {
         if (homeViewSetting) setHomeViewSetting(false);
         else if (settingsOpen) setSettingsOpen(false);
         else if (remoteModalVisible) handleRemoteModalClose();
+        else if (blindModalVisible) handleBlindModalClose();
         else handleModalClose();
-      } else if (e.key === ' ' && !settingsOpen && !modalVisible && !remoteModalVisible) {
+      } else if (e.key === ' ' && !settingsOpen && !modalVisible && !remoteModalVisible && !blindModalVisible) {
         e.preventDefault();
         if (homeViewSetting) saveHomeView();
         else resetView();
@@ -1423,7 +1681,7 @@ export default function Dashboard() {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [handleModalClose, handleRemoteModalClose, settingsOpen, modalVisible, remoteModalVisible, resetView, navigate, homeViewSetting, saveHomeView]);
+  }, [handleModalClose, handleRemoteModalClose, handleBlindModalClose, settingsOpen, modalVisible, remoteModalVisible, blindModalVisible, resetView, navigate, homeViewSetting, saveHomeView]);
 
   // 3-finger touch to reset view (mobile)
   useEffect(() => {
@@ -1450,6 +1708,7 @@ export default function Dashboard() {
     });
     const updatedPanel = { ...config.sidePanel, cards: updatedCards };
     configRef.current = { ...config, sidePanel: updatedPanel };
+    rebuildEntityIndexes(configRef.current);
     setSidePanelConfig(updatedPanel);
     // Sync editing card layout if properties panel is open
     setEditingCard(prev => {
@@ -1460,7 +1719,7 @@ export default function Dashboard() {
     try { updateConfig({ sidePanel: updatedPanel }); } catch (err) {
       console.warn('[Config] Failed to save grid layout:', err);
     }
-  }, []);
+  }, [rebuildEntityIndexes]);
 
   const handleEditGridDone = useCallback(() => {
     setGridEditMode(false);
@@ -1484,9 +1743,10 @@ export default function Dashboard() {
     const updatedCards = config.sidePanel.cards.filter(c => c.id !== cardId);
     const updatedPanel = { ...config.sidePanel, cards: updatedCards };
     configRef.current = { ...config, sidePanel: updatedPanel };
+    rebuildEntityIndexes(configRef.current);
     updateConfig({ sidePanel: updatedPanel });
     setSidePanelConfig(updatedPanel);
-  }, []);
+  }, [rebuildEntityIndexes]);
 
   const handleCardSave = useCallback((card: SidePanelCard) => {
     const config = configRef.current;
@@ -1498,11 +1758,12 @@ export default function Dashboard() {
       : [...panel.cards, card];
     const updatedPanel = { ...panel, cards: updatedCards };
     configRef.current = { ...config, sidePanel: updatedPanel };
+    rebuildEntityIndexes(configRef.current);
     updateConfig({ sidePanel: updatedPanel });
     setSidePanelConfig(updatedPanel);
     setCardPanelOpen(false);
     setEditingCard(null);
-  }, []);
+  }, [rebuildEntityIndexes]);
 
   // Live preview: update the grid as the user edits fields (no persist)
   const handleCardPreview = useCallback((card: SidePanelCard) => {
@@ -1511,8 +1772,9 @@ export default function Dashboard() {
     const updatedCards = config.sidePanel.cards.map(c => c.id === card.id ? card : c);
     const updatedPanel = { ...config.sidePanel, cards: updatedCards };
     // Update state for live render, but don't persist yet
+    rebuildEntityIndexes({ ...config, sidePanel: updatedPanel });
     setSidePanelConfig(updatedPanel);
-  }, []);
+  }, [rebuildEntityIndexes]);
 
   // Apply camera controls based on device type
   useEffect(() => {
@@ -1522,17 +1784,18 @@ export default function Dashboard() {
     const isMobile = window.matchMedia('(pointer: coarse)').matches;
     const flags = isMobile ? camControls.mobile : camControls.desktop;
 
-    // Zoom: wheelPrecision for mouse, pinchPrecision for touch
-    camera.wheelPrecision = flags.zoom ? 5 : 99999;
-    camera.pinchPrecision = flags.zoom ? 12 : 99999;
+    // Zoom: wheelDeltaPercentage keeps mouse and trackpad zoom smooth across distances.
+    camera.wheelPrecision = flags.zoom ? CAMERA_CONTROL_SENSITIVITY.wheelPrecision : 99999;
+    camera.wheelDeltaPercentage = flags.zoom ? CAMERA_CONTROL_SENSITIVITY.wheelDeltaPercentage : 0;
+    camera.pinchPrecision = flags.zoom ? CAMERA_CONTROL_SENSITIVITY.pinchPrecision : 99999;
 
     // Rotate: angular sensibility (higher = less sensitive, huge = disabled)
-    const rotVal = flags.rotate ? 800 : 99999;
-    camera.angularSensibilityX = rotVal;
-    camera.angularSensibilityY = rotVal;
+    camera.angularSensibilityX = flags.rotate ? CAMERA_CONTROL_SENSITIVITY.angularSensibilityX : 99999;
+    camera.angularSensibilityY = flags.rotate ? CAMERA_CONTROL_SENSITIVITY.angularSensibilityY : 99999;
+    camera.inertia = CAMERA_CONTROL_SENSITIVITY.inertia;
 
     // Pan: scale sensibility with radius so panning stays consistent at any zoom level
-    const BASE_PAN = 75;
+    const BASE_PAN = CAMERA_CONTROL_SENSITIVITY.panningSensibility;
     const refRadius = computeIdealRadius();
     if (!flags.pan) {
       camera.panningSensibility = 0;
@@ -1602,8 +1865,8 @@ export default function Dashboard() {
         <canvas ref={canvasRef} />
 
         <HUD
-          latitude={configRef.current?.location.latitude ?? 43.6077}
-          longitude={configRef.current?.location.longitude ?? 3.8766}
+          latitude={SYSTEM_LOCATION.latitude}
+          longitude={SYSTEM_LOCATION.longitude}
           northOffset={northOffset}
           sunLight={sceneCtxRef.current?.sunLight ?? null}
           hemiLight={sceneCtxRef.current?.hemiLight ?? null}
@@ -1614,7 +1877,32 @@ export default function Dashboard() {
           onSliderValueChange={setSliderValue}
           onScrubberTimeChange={setScrubberTime}
           cloudCoverFactor={cloudCoverFactor}
+          currentWeather={currentWeather}
         />
+
+        <div className="dashboard-render-toggle">
+          <button
+            className={`dashboard-texture-toggle${showTextures ? ' active' : ''}`}
+            onClick={() => handleShowTexturesChange(!showTextures)}
+            aria-label={`${t('settings.textures')} ${showTextures ? t('common.on') : t('common.off')}`}
+            aria-pressed={showTextures}
+            title={`${t('settings.textures')} ${showTextures ? t('common.on') : t('common.off')}`}
+          >
+            <span className="dashboard-texture-toggle-thumb">
+              {showTextures
+                ? <ImageIcon size={12} strokeWidth={1.8} aria-hidden="true" />
+                : <ImageOff size={12} strokeWidth={1.8} aria-hidden="true" />}
+            </span>
+          </button>
+          <button
+            className="dashboard-icon-btn dashboard-recenter-btn"
+            onClick={recenterModelView}
+            aria-label={t('common.recenter')}
+            title={t('common.recenter')}
+          >
+            <Crosshair size={12} strokeWidth={1.8} aria-hidden="true" />
+          </button>
+        </div>
 
         <DebugPanel
           open={debugOpen}
@@ -1658,6 +1946,18 @@ export default function Dashboard() {
           onPressButton={handleRemoteButtonPress}
         />
 
+        <BlindModal
+          visible={blindModalVisible}
+          entityId={blindModalEntityId}
+          label={blindModalLabel}
+          state={blindModalState}
+          onClose={handleBlindModalClose}
+          onOpenCover={handleBlindOpen}
+          onCloseCover={handleBlindClose}
+          onStopCover={handleBlindStop}
+          onSetPosition={handleBlindSetPosition}
+        />
+
         <DisplayModal
           display={displayModalConfig}
           states={displayModalStates}
@@ -1669,6 +1969,12 @@ export default function Dashboard() {
           onSetHvacMode={(entityId, mode) => {
             haRef.current?.callService('climate', 'set_hvac_mode', entityId, { hvac_mode: mode });
           }}
+          onMediaTurnOn={handleMediaTurnOn}
+          onMediaTurnOff={handleMediaTurnOff}
+          onMediaPlayPause={handleMediaPlayPause}
+          onMediaStop={handleMediaStop}
+          onMediaSetVolume={handleMediaSetVolume}
+          onMediaSelectSource={handleMediaSelectSource}
         />
 
         <SettingsModal
@@ -1697,6 +2003,7 @@ export default function Dashboard() {
           onPointShadowResChange={handlePointShadowResChange}
           showTextures={showTextures}
           onShowTexturesChange={handleShowTexturesChange}
+          onRecenterView={recenterModelView}
           sketchColor={sketchColor}
           onSketchColorChange={handleSketchColorChange}
           sketchSpecular={sketchSpecular}
@@ -1718,12 +2025,13 @@ export default function Dashboard() {
         {homeViewSetting && (
           <div className="home-view-overlay">
             <div className="home-view-overlay-box">
-              <p>Position the view as you want it</p>
-              <p className="home-view-overlay-hint">
-                Press <kbd>Space</kbd> or use <strong>3 fingers</strong> to validate
-              </p>
+              <p>{t('dashboard.positionHomeView')}</p>
+              <p
+                className="home-view-overlay-hint"
+                dangerouslySetInnerHTML={{ __html: t('dashboard.validateHomeView') }}
+              />
               <button className="home-view-overlay-cancel" onClick={() => setHomeViewSetting(false)}>
-                Cancel
+                {t('common.cancel')}
               </button>
             </div>
           </div>

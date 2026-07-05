@@ -32,7 +32,8 @@ export interface HAConnectOptions {
 /** Build a WebSocket URL, using wss:// when the page is served over HTTPS. */
 export function buildWsUrl(url: string, port: number): string {
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${protocol}://${url}:${port}/api/websocket`;
+  const host = url.trim().replace(/^(?:https?|wss?):\/\//i, '').split('/')[0].replace(/:\d+$/, '');
+  return `${protocol}://${host}:${port}/api/websocket`;
 }
 
 export class HAConnection {
@@ -44,7 +45,11 @@ export class HAConnection {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private pongTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
-  private pendingResults = new Map<number, { resolve: (value?: unknown) => void; reject: (err: Error) => void }>();
+  private pendingResults = new Map<number, {
+    resolve: (value?: unknown) => void;
+    reject: (err: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
 
   constructor(options: HAConnectOptions, callbacks: HACallbacks) {
     this.options = options;
@@ -57,7 +62,15 @@ export class HAConnection {
 
     const { url, port } = this.options;
     const wsUrl = buildWsUrl(url, port);
-    this.ws = new WebSocket(wsUrl);
+    try {
+      this.ws = new WebSocket(wsUrl);
+    } catch (err) {
+      this.ws = null;
+      this.callbacks.onStatusChanged?.('error');
+      this.failPendingResults(err instanceof Error ? err : new Error('Invalid WebSocket URL'));
+      console.warn('[HAConnection] Invalid WebSocket URL:', wsUrl, err);
+      return;
+    }
 
     this.ws.onopen = () => {
       // Wait for auth_required from HA
@@ -103,6 +116,7 @@ export class HAConnection {
         const pending = this.pendingResults.get(msg.id);
         if (pending) {
           this.pendingResults.delete(msg.id);
+          clearTimeout(pending.timer);
           msg.success ? pending.resolve(msg.result) : pending.reject(new Error(msg.error?.message ?? 'Service call failed'));
         } else if (Array.isArray(msg.result)) {
           this.callbacks.onInitialStates?.(msg.result);
@@ -117,8 +131,7 @@ export class HAConnection {
 
     this.ws.onclose = () => {
       this.stopHeartbeat();
-      for (const p of this.pendingResults.values()) p.reject(new Error('Connection closed'));
-      this.pendingResults.clear();
+      this.failPendingResults(new Error('Connection closed'));
       if (this.disposed) return;
       this.callbacks.onStatusChanged?.('disconnected');
       this.reconnectTimer = setTimeout(() => this.connect(), 5000);
@@ -141,8 +154,7 @@ export class HAConnection {
       this.ws = null;
     }
     // Fail any in-flight requests so callers don't hang on the dead socket
-    for (const p of this.pendingResults.values()) p.reject(new Error('Reconnecting'));
-    this.pendingResults.clear();
+    this.failPendingResults(new Error('Reconnecting'));
     this.connect();
   }
 
@@ -174,13 +186,17 @@ export class HAConnection {
 
   /** Send an arbitrary WS message and return the result. */
   request(msg: Record<string, unknown>): Promise<unknown> {
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error('Connection is not open'));
+    }
+
     const id = this.msgId++;
     return new Promise((resolve, reject) => {
-      this.pendingResults.set(id, { resolve, reject });
-      this.send({ ...msg, id });
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (this.pendingResults.delete(id)) reject(new Error('Timeout'));
       }, 15000);
+      this.pendingResults.set(id, { resolve, reject, timer });
+      this.send({ ...msg, id });
     });
   }
 
@@ -198,7 +214,16 @@ export class HAConnection {
     this.disposed = true;
     this.stopHeartbeat();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.failPendingResults(new Error('Connection disposed'));
     this.ws?.close();
     this.ws = null;
+  }
+
+  private failPendingResults(error: Error): void {
+    for (const pending of this.pendingResults.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+    }
+    this.pendingResults.clear();
   }
 }

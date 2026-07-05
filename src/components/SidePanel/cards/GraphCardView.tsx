@@ -3,6 +3,7 @@ import type { GraphCard, HAHistoryPoint } from '../../../types';
 import { fetchHistory, generateDemoHistory } from '../../../services/haHistoryApi';
 import { useDemoMode } from '../../../contexts/DemoModeContext';
 import { useSimulationMode } from '../../../contexts/SimulationModeContext';
+import { useTranslation } from '../../../contexts/LanguageContext';
 import CardShell from './CardShell';
 
 interface Props {
@@ -12,6 +13,7 @@ interface Props {
 export default function GraphCardView({ card }: Props) {
   const { demoMode } = useDemoMode();
   const { simulationMode } = useSimulationMode();
+  const t = useTranslation();
   const [points, setPoints] = useState<HAHistoryPoint[]>([]);
   const [error, setError] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -48,8 +50,8 @@ export default function GraphCardView({ card }: Props) {
     .filter(p => !isNaN(p.value));
 
   const renderGraph = () => {
-    if (error) return <span className="graph-card-error">Failed to load</span>;
-    if (numericPoints.length < 2) return <span className="graph-card-loading">Loading...</span>;
+    if (error) return <span className="graph-card-error">{t('modal.failedToLoad')}</span>;
+    if (numericPoints.length < 2) return <span className="graph-card-loading">{t('common.loading')}</span>;
 
     const values = numericPoints.map(p => p.value);
     const times = numericPoints.map(p => p.time);

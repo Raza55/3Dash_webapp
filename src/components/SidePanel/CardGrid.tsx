@@ -8,6 +8,7 @@ import ScriptCardView from './cards/ScriptCardView';
 import IndicatorCardView from './cards/IndicatorCardView';
 import GraphCardView from './cards/GraphCardView';
 import IndicatorModal from './cards/IndicatorModal';
+import { useTranslation } from '../../contexts/LanguageContext';
 import '../SidePanel/CardPropertiesPanel.css';
 
 interface Props {
@@ -39,6 +40,7 @@ function useIsMobile() {
 
 export default function CardGrid({ config, ha, cardStates, width, editMode, onLayoutChange, onSetTemperature, onSetHvacMode, onCardEdit, onCardDelete }: Props) {
   const isMobile = useIsMobile();
+  const t = useTranslation();
   const [selectedIndicator, setSelectedIndicator] = useState<IndicatorCard | null>(null);
 
   const renderCardContent = (card: typeof config.cards[number]) => {
@@ -64,12 +66,12 @@ export default function CardGrid({ config, ha, cardStates, width, editMode, onLa
           <button
             className="card-edit-btn card-edit-btn-delete"
             onClick={e => { e.stopPropagation(); onCardDelete?.(card.id); }}
-            title="Delete card"
+            title={t('cards.deleteCardTitle')}
           >&#x2715;</button>
           <button
             className="card-edit-btn card-edit-btn-edit"
             onClick={e => { e.stopPropagation(); onCardEdit?.(card); }}
-            title="Edit card"
+            title={t('cards.editCardTitle')}
           >&#x270E;</button>
         </div>
       )}

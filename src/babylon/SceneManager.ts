@@ -15,6 +15,16 @@ import {
   type AbstractMesh,
 } from '@babylonjs/core';
 
+export const CAMERA_CONTROL_SENSITIVITY = {
+  wheelPrecision: 32,
+  wheelDeltaPercentage: 0.003,
+  pinchPrecision: 44,
+  angularSensibilityX: 1600,
+  angularSensibilityY: 1600,
+  panningSensibility: 2300,
+  inertia: 0.78,
+} as const;
+
 export interface SceneContext {
   engine: Engine;
   scene: Scene;
@@ -28,6 +38,19 @@ export interface SceneContext {
 
 export interface CreateSceneOptions {
   enableGlow?: boolean;
+  maxDevicePixelRatio?: number;
+  preserveDrawingBuffer?: boolean;
+  stencil?: boolean;
+}
+
+export function applyCameraControlSensitivity(camera: ArcRotateCamera): void {
+  camera.wheelPrecision = CAMERA_CONTROL_SENSITIVITY.wheelPrecision;
+  camera.wheelDeltaPercentage = CAMERA_CONTROL_SENSITIVITY.wheelDeltaPercentage;
+  camera.pinchPrecision = CAMERA_CONTROL_SENSITIVITY.pinchPrecision;
+  camera.angularSensibilityX = CAMERA_CONTROL_SENSITIVITY.angularSensibilityX;
+  camera.angularSensibilityY = CAMERA_CONTROL_SENSITIVITY.angularSensibilityY;
+  camera.panningSensibility = CAMERA_CONTROL_SENSITIVITY.panningSensibility;
+  camera.inertia = CAMERA_CONTROL_SENSITIVITY.inertia;
 }
 
 export function createScene(
@@ -37,11 +60,14 @@ export function createScene(
   // Suppress Draco normalized-flag warnings
   Logger.LogLevels = Logger.ErrorLogLevel;
 
+  const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  const maxDevicePixelRatio = options?.maxDevicePixelRatio ?? (coarsePointer ? 1.5 : 2);
+
   const engine = new Engine(canvas, true, {
-    preserveDrawingBuffer: true,
-    stencil: true,
+    preserveDrawingBuffer: options?.preserveDrawingBuffer ?? false,
+    stencil: options?.stencil ?? !!options?.enableGlow,
   });
-  engine.setHardwareScalingLevel(1 / Math.min(window.devicePixelRatio, 2));
+  engine.setHardwareScalingLevel(1 / Math.min(window.devicePixelRatio || 1, maxDevicePixelRatio));
 
   // Disable UBOs so lights use regular uniforms instead of uniform blocks.
   // WebGL2 limits uniform blocks to 12 per shader stage which caps lights at ~10.
@@ -73,12 +99,9 @@ export function createScene(
   camera.inputs.addMouseWheel();
   camera.inputs.addPointers();
   camera.panningAxis = new Vector3(1, 1, 1);
-  camera.panningSensibility = 75;
-  camera.angularSensibilityX = 800;
-  camera.angularSensibilityY = 800;
   camera.lowerRadiusLimit = 5;
   camera.upperRadiusLimit = 60;
-  camera.wheelPrecision = 5;
+  applyCameraControlSensitivity(camera);
   camera.attachControl(canvas, true);
 
   // Ambient fill light — gentle fill so HA lights stand out
@@ -107,15 +130,38 @@ export function createScene(
     highlightLayer.blurVerticalSize = 1;
   }
 
-  // Render loop
-  engine.runRenderLoop(() => scene.render());
+  const renderFrame = () => scene.render();
+  let renderLoopRunning = false;
+  const startRenderLoop = () => {
+    if (renderLoopRunning) return;
+    engine.runRenderLoop(renderFrame);
+    renderLoopRunning = true;
+  };
+  const stopRenderLoop = () => {
+    if (!renderLoopRunning) return;
+    engine.stopRenderLoop(renderFrame);
+    renderLoopRunning = false;
+  };
+
+  startRenderLoop();
 
   const onResize = () => engine.resize();
   window.addEventListener('resize', onResize);
 
+  const onVisibilityChange = () => {
+    if (document.hidden) {
+      stopRenderLoop();
+    } else {
+      engine.resize();
+      startRenderLoop();
+    }
+  };
+  document.addEventListener('visibilitychange', onVisibilityChange);
+
   function dispose() {
     window.removeEventListener('resize', onResize);
-    engine.stopRenderLoop();
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    stopRenderLoop();
     scene.dispose();
     engine.dispose();
   }

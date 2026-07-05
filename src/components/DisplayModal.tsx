@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { DisplayConfig, HAState, HAHistoryPoint } from '../types';
 import { fetchHistory, generateDemoHistory } from '../services/haHistoryApi';
 import { useDemoMode } from '../contexts/DemoModeContext';
+import { useTranslation } from '../contexts/LanguageContext';
 import LucideIcon from './SidePanel/cards/LucideIcon';
 import './SidePanel/cards/IndicatorModal.css';
 
@@ -55,6 +56,12 @@ interface Props {
   onClose: () => void;
   onSetTemperature: (entityId: string, temperature: number) => void;
   onSetHvacMode: (entityId: string, mode: string) => void;
+  onMediaTurnOn: (entityId: string) => void;
+  onMediaTurnOff: (entityId: string) => void;
+  onMediaPlayPause: (entityId: string) => void;
+  onMediaStop: (entityId: string) => void;
+  onMediaSetVolume: (entityId: string, volume: number) => void;
+  onMediaSelectSource: (entityId: string, source: string) => void;
 }
 
 /** Graph section for a single sensor source. */
@@ -65,6 +72,7 @@ function SensorGraph({ entityId, label, unit, precision }: {
   precision?: number;
 }) {
   const { demoMode } = useDemoMode();
+  const t = useTranslation();
   const [period, setPeriod] = useState<string>('24h');
   const [points, setPoints] = useState<HAHistoryPoint[]>([]);
   const [error, setError] = useState(false);
@@ -93,8 +101,8 @@ function SensorGraph({ entityId, label, unit, precision }: {
     .filter(p => !isNaN(p.value));
 
   const renderGraph = () => {
-    if (error) return <span className="im-graph-msg">Failed to load</span>;
-    if (numericPoints.length < 2) return <span className="im-graph-msg">Loading...</span>;
+    if (error) return <span className="im-graph-msg">{t('modal.failedToLoad')}</span>;
+    if (numericPoints.length < 2) return <span className="im-graph-msg">{t('common.loading')}</span>;
 
     const values = numericPoints.map(p => p.value);
     const times = numericPoints.map(p => p.time);
@@ -164,6 +172,7 @@ function ClimateGauge({ entityId, climateState, onSetTemperature, onSetHvacMode 
   onSetTemperature: (entityId: string, temperature: number) => void;
   onSetHvacMode: (entityId: string, mode: string) => void;
 }) {
+  const t = useTranslation();
   const [targetTemp, setTargetTemp] = useState(20);
   const [hvacMode, setHvacMode] = useState('off');
   const svgRef = useRef<SVGSVGElement>(null);
@@ -213,7 +222,8 @@ function ClimateGauge({ entityId, climateState, onSetTemperature, onSetHvacMode 
   const isOff = hvacMode === 'off';
 
   const hvacAction = climateState?.attributes.hvac_action as string | undefined;
-  const climateStatus = isOff ? 'Off' : (hvacAction === 'heating' ? 'Heating' : 'Idle');
+  const climateStatusKey = isOff ? 'off' : (hvacAction === 'heating' ? 'heating' : 'idle');
+  const climateStatus = t(`modal.${climateStatusKey}`);
 
   const targetAngle = tempToAngle(targetTemp, minTemp, maxTemp);
   const currentAngle = tempToAngle(currentTemp, minTemp, maxTemp);
@@ -248,7 +258,7 @@ function ClimateGauge({ entityId, climateState, onSetTemperature, onSetHvacMode 
             </radialGradient>
           </defs>
 
-          {climateStatus === 'Heating' && (
+          {climateStatusKey === 'heating' && (
             <circle cx={GAUGE_CX} cy={GAUGE_CY} r={GAUGE_R + GAUGE_STROKE} fill="url(#gaugeGlow)" />
           )}
 
@@ -279,7 +289,7 @@ function ClimateGauge({ entityId, climateState, onSetTemperature, onSetHvacMode 
             x={GAUGE_CX}
             y={isOff ? GAUGE_CY + 5 : GAUGE_CY - 28}
             textAnchor="middle"
-            className={`im-gauge-status ${climateStatus.toLowerCase()}`}
+            className={`im-gauge-status ${climateStatusKey}`}
           >
             {climateStatus}
           </text>
@@ -314,6 +324,96 @@ function ClimateGauge({ entityId, climateState, onSetTemperature, onSetHvacMode 
   );
 }
 
+function getTvSource(display: DisplayConfig): string | null {
+  return display.sources.find((src) => src.entityId.startsWith('media_player.'))?.entityId
+    ?? display.sources[0]?.entityId
+    ?? null;
+}
+
+function TVControls({
+  entityId,
+  state,
+  onTurnOn,
+  onTurnOff,
+  onPlayPause,
+  onStop,
+  onSetVolume,
+  onSelectSource,
+}: {
+  entityId: string;
+  state: HAState | undefined;
+  onTurnOn: (entityId: string) => void;
+  onTurnOff: (entityId: string) => void;
+  onPlayPause: (entityId: string) => void;
+  onStop: (entityId: string) => void;
+  onSetVolume: (entityId: string, volume: number) => void;
+  onSelectSource: (entityId: string, source: string) => void;
+}) {
+  const t = useTranslation();
+  const attrs = state?.attributes ?? {};
+  const currentState = state?.state ?? 'unknown';
+  const isOff = currentState === 'off' || currentState === 'unavailable' || currentState === 'unknown';
+  const title = String(attrs.media_title ?? attrs.media_series_title ?? '').trim();
+  const app = String(attrs.app_name ?? attrs.source ?? '').trim();
+  const source = String(attrs.source ?? '').trim();
+  const sourceList = Array.isArray(attrs.source_list)
+    ? attrs.source_list.filter((item): item is string => typeof item === 'string')
+    : [];
+  const volume = typeof attrs.volume_level === 'number' ? attrs.volume_level : 0;
+
+  return (
+    <div className="im-section tv-control">
+      <div className={`tv-screen-preview${isOff ? ' off' : ' on'}`}>
+        <div className="tv-screen-state">{currentState.toUpperCase()}</div>
+        <div className="tv-screen-title">{isOff ? t('modal.tvOff') : (title || app || entityId)}</div>
+        {!isOff && <div className="tv-screen-subtitle">{[app, source].filter(Boolean).join(' | ')}</div>}
+      </div>
+
+      <div className="tv-control-grid">
+        <button className="im-period-btn" onClick={() => isOff ? onTurnOn(entityId) : onTurnOff(entityId)}>
+          {isOff ? t('modal.turnOn') : t('modal.turnOff')}
+        </button>
+        <button className="im-period-btn" disabled={isOff} onClick={() => onPlayPause(entityId)}>
+          {t('modal.playPause')}
+        </button>
+        <button className="im-period-btn" disabled={isOff} onClick={() => onStop(entityId)}>
+          {t('common.stop')}
+        </button>
+      </div>
+
+      <div className="field-group">
+        <label className="im-label">{t('modal.volume')} {Math.round(volume * 100)}%</label>
+        <input
+          type="range"
+          className="pos-slider"
+          min={0}
+          max={1}
+          step={0.01}
+          value={volume}
+          disabled={isOff}
+          onChange={(e) => onSetVolume(entityId, parseFloat(e.target.value))}
+        />
+      </div>
+
+      {sourceList.length > 0 && (
+        <div className="field-group">
+          <label className="im-label">{t('modal.source')}</label>
+          <select
+            className="field-select"
+            value={source}
+            disabled={isOff}
+            onChange={(e) => onSelectSource(entityId, e.target.value)}
+          >
+            {sourceList.map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DisplayModal({
   display,
   states,
@@ -321,8 +421,16 @@ export default function DisplayModal({
   onClose,
   onSetTemperature,
   onSetHvacMode,
+  onMediaTurnOn,
+  onMediaTurnOff,
+  onMediaPlayPause,
+  onMediaStop,
+  onMediaSetVolume,
+  onMediaSelectSource,
 }: Props) {
   if (!display) return null;
+
+  const tvEntityId = display.kind === 'tv' ? getTvSource(display) : null;
 
   // Determine which sections to show per source
   const sections = display.sources.map((src) => {
@@ -349,13 +457,15 @@ export default function DisplayModal({
             <div>
               <div className="im-name">{display.label}</div>
               <div className="im-value-inline">
-                {display.sources.map((src) => {
-                  const ha = states[src.entityId];
-                  const val = ha?.state ?? '--';
-                  const num = parseFloat(val);
-                  const formatted = isNaN(num) ? val : num.toFixed(src.precision ?? 0);
-                  return `${src.label ? src.label + ' ' : ''}${formatted}${src.unit ?? ''}`;
-                }).join('  ')}
+                {tvEntityId
+                  ? `${states[tvEntityId]?.state ?? '--'}${states[tvEntityId]?.attributes?.source ? ` | ${String(states[tvEntityId].attributes.source)}` : ''}`
+                  : display.sources.map((src) => {
+                    const ha = states[src.entityId];
+                    const val = ha?.state ?? '--';
+                    const num = parseFloat(val);
+                    const formatted = isNaN(num) ? val : num.toFixed(src.precision ?? 0);
+                    return `${src.label ? src.label + ' ' : ''}${formatted}${src.unit ?? ''}`;
+                  }).join('  ')}
               </div>
             </div>
           </div>
@@ -363,6 +473,21 @@ export default function DisplayModal({
         </div>
 
         <div className="im-body">
+          {tvEntityId && (
+            <TVControls
+              entityId={tvEntityId}
+              state={states[tvEntityId]}
+              onTurnOn={onMediaTurnOn}
+              onTurnOff={onMediaTurnOff}
+              onPlayPause={onMediaPlayPause}
+              onStop={onMediaStop}
+              onSetVolume={onMediaSetVolume}
+              onSelectSource={onMediaSelectSource}
+            />
+          )}
+
+          {!tvEntityId && (
+            <>
           {/* Sensor graphs */}
           {sensorSources.map(({ src }) => (
             <SensorGraph
@@ -384,6 +509,8 @@ export default function DisplayModal({
               onSetHvacMode={onSetHvacMode}
             />
           ))}
+            </>
+          )}
         </div>
       </div>
     </div>

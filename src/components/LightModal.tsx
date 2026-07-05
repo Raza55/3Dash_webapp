@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import ColorWheel, { hslToRgb } from './ColorWheel';
 import { kelvinToRGB, miredToKelvin } from '../utils/color';
 import type { LightType, HAState } from '../types';
+import { useTranslation } from '../contexts/LanguageContext';
 import './LightModal.css';
 
 interface Props {
@@ -35,6 +36,7 @@ export default function LightModal({
   doubleTapEntityId,
   doubleTapState,
 }: Props) {
+  const t = useTranslation();
   const [brightness, setBrightness] = useState(255);
   const [colorTemp, setColorTemp] = useState(300);
   const [whiteValue, setWhiteValue] = useState(0);
@@ -174,7 +176,7 @@ export default function LightModal({
         <div className="modal-body">
           {/* Toggle */}
           <div className="modal-row">
-            <span className="modal-label">Power</span>
+            <span className="modal-label">{t('modal.power')}</span>
             <label className="toggle-switch">
               <input type="checkbox" checked={isOn} onChange={handleToggle} />
               <div className="toggle-track" />
@@ -198,7 +200,7 @@ export default function LightModal({
           {showBrightness && (
             <div className="modal-slider-wrap">
               <div className="slider-header">
-                <span className="modal-label">Brightness</span>
+                <span className="modal-label">{t('modal.brightness')}</span>
                 <span className="slider-value">
                   {Math.round((brightness / 255) * 100)}%
                 </span>
@@ -218,7 +220,7 @@ export default function LightModal({
           {showTemp && (
             <div className="modal-slider-wrap">
               <div className="slider-header">
-                <span className="modal-label">Temperature</span>
+                <span className="modal-label">{t('modal.temperature')}</span>
                 <span className="slider-value">
                   {miredToKelvin(colorTemp)}K
                 </span>
@@ -237,13 +239,13 @@ export default function LightModal({
           {/* Hue ring */}
           {showColor && (
             <div className="color-section">
-              <span className="modal-label">Color</span>
+              <span className="modal-label">{t('modal.color')}</span>
               <div className="hue-ring-wrap">
                 <ColorWheel hue={hue} onChange={handleHueChange} />
               </div>
               <div className="modal-slider-wrap">
                 <div className="slider-header">
-                  <span className="modal-label">White tone</span>
+                  <span className="modal-label">{t('modal.whiteTone')}</span>
                   <span className="slider-value">{whiteKelvin}K</span>
                 </div>
                 <input
@@ -261,7 +263,7 @@ export default function LightModal({
           {/* White channel */}
           {showWhite && (
             <div className="modal-slider-wrap">
-              <span className="modal-label">White channel</span>
+              <span className="modal-label">{t('modal.whiteChannel')}</span>
               <div className="slider-header">
                 <span className="modal-label" style={{ opacity: 0 }}>
                   &zwnj;

@@ -5,6 +5,7 @@ let groundMesh: Mesh | null = null;
 let gridMat: GridMaterial | null = null;
 let shadowMesh: Mesh | null = null;
 let shadowMat: StandardMaterial | null = null;
+let shadowTex: DynamicTexture | null = null;
 
 /** Radius of the circular ground grid (world units). */
 export const GRID_RADIUS = 90;
@@ -71,8 +72,8 @@ export function createModelShadow(
   if (shadowMesh) return;
 
   const texSize = 256;
-  const dt = new DynamicTexture('shadowTex', texSize, scene, false);
-  const ctx2d = dt.getContext();
+  shadowTex = new DynamicTexture('shadowTex', texSize, scene, false);
+  const ctx2d = shadowTex.getContext();
   const half = texSize / 2;
   const gradient = ctx2d.createRadialGradient(half, half, 0, half, half, half);
   gradient.addColorStop(0, 'rgba(0,0,0,0.75)');
@@ -80,11 +81,11 @@ export function createModelShadow(
   gradient.addColorStop(1, 'rgba(0,0,0,0)');
   ctx2d.fillStyle = gradient;
   ctx2d.fillRect(0, 0, texSize, texSize);
-  dt.update();
+  shadowTex.update();
 
   shadowMat = new StandardMaterial('shadowBlobMat', scene);
-  shadowMat.diffuseTexture = dt;
-  shadowMat.opacityTexture = dt;
+  shadowMat.diffuseTexture = shadowTex;
+  shadowMat.opacityTexture = shadowTex;
   shadowMat.disableLighting = true;
   shadowMat.backFaceCulling = false;
 
@@ -107,8 +108,10 @@ export function disposeGroundGrid(): void {
   gridMat?.dispose();
   shadowMesh?.dispose();
   shadowMat?.dispose();
+  shadowTex?.dispose();
   groundMesh = null;
   gridMat = null;
   shadowMesh = null;
   shadowMat = null;
+  shadowTex = null;
 }

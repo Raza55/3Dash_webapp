@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { updateSettings } from '../../../services/settingsStore';
 import { buildWsUrl } from '../../../services/haWebSocket';
+import { useTranslation } from '../../../contexts/LanguageContext';
 
 interface Props {
   onComplete: () => void;
@@ -10,7 +11,14 @@ interface Props {
 /** Test HA connection by opening a temporary WebSocket. */
 export async function testHA(url: string, port: number, token: string): Promise<{ success: boolean; error?: string }> {
   return new Promise((resolve) => {
-    const ws = new WebSocket(buildWsUrl(url, port));
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(buildWsUrl(url, port));
+    } catch {
+      resolve({ success: false, error: 'Invalid URL' });
+      return;
+    }
+
     const timeout = setTimeout(() => { ws.close(); resolve({ success: false, error: 'Timeout (5s)' }); }, 5000);
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
@@ -27,6 +35,7 @@ export async function testHA(url: string, port: number, token: string): Promise<
 }
 
 export default function HASetupStep({ onComplete, initialHA }: Props) {
+  const t = useTranslation();
   const [url, setUrl] = useState(initialHA?.url ?? '');
   const [port, setPort] = useState(initialHA?.port ?? 8123);
   const [token, setToken] = useState(initialHA?.token ?? '');
@@ -44,11 +53,11 @@ export default function HASetupStep({ onComplete, initialHA }: Props) {
         setStatus('success');
       } else {
         setStatus('error');
-        setErrorMsg(result.error || 'Connection failed');
+        setErrorMsg(result.error || t('onboarding.connectionFailed'));
       }
     } catch {
       setStatus('error');
-      setErrorMsg('Network error');
+      setErrorMsg(t('onboarding.networkError'));
     }
   };
 
@@ -60,7 +69,7 @@ export default function HASetupStep({ onComplete, initialHA }: Props) {
       onComplete();
     } catch {
       setStatus('error');
-      setErrorMsg('Failed to save configuration');
+      setErrorMsg(t('onboarding.saveConfigurationFailed'));
     } finally {
       setSaving(false);
     }
@@ -69,21 +78,20 @@ export default function HASetupStep({ onComplete, initialHA }: Props) {
   return (
     <div className="onboarding-step">
       <div>
-        <h1>Home Assistant</h1>
-        <h2>Connect to your Home Assistant instance</h2>
+        <h1>{t('onboarding.haTitle')}</h1>
+        <h2>{t('onboarding.haSubtitle')}</h2>
       </div>
 
       {window.location.protocol === 'https:' && (
         <div className="onboarding-tips">
-          <div className="onboarding-tips-title">HTTPS detected</div>
+          <div className="onboarding-tips-title">{t('onboarding.httpsDetected')}</div>
           <ul>
-            <li>Your browser requires a secure WebSocket connection (WSS)</li>
-            <li>Make sure your Home Assistant is accessible over HTTPS (e.g. via Nabu Casa or a reverse proxy with SSL)</li>
-            <li>A local <code>ws://</code> address will not work from an HTTPS page</li>
+            <li>{t('onboarding.httpsTip1')}</li>
+            <li>{t('onboarding.httpsTip2')}</li>
+            <li>{t('onboarding.httpsTip3')}</li>
           </ul>
           <div style={{ marginTop: 12, fontSize: '0.9em', opacity: 0.85 }}>
-            Don't have Nabu Casa, or don't want to expose your Home Assistant to the internet?
-            No problem — host 3Dash directly on your HA server in a few clicks:
+            {t('onboarding.noNabuCasa')}
           </div>
           <a
             href="https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fkdcius%2F3Dash_webapp"
@@ -93,7 +101,7 @@ export default function HASetupStep({ onComplete, initialHA }: Props) {
           >
             <img
               src="https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg"
-              alt="Add repository to Home Assistant"
+              alt={t('onboarding.addRepoAlt')}
             />
           </a>
         </div>
@@ -101,7 +109,7 @@ export default function HASetupStep({ onComplete, initialHA }: Props) {
 
       <div className="onboarding-row">
         <div className="onboarding-field" style={{ flex: 3 }}>
-          <label className="onboarding-label">IP Address or URL</label>
+          <label className="onboarding-label">{t('onboarding.ipUrl')}</label>
           <input
             className="onboarding-input"
             type="text"
@@ -111,7 +119,7 @@ export default function HASetupStep({ onComplete, initialHA }: Props) {
           />
         </div>
         <div className="onboarding-field" style={{ flex: 1 }}>
-          <label className="onboarding-label">Port</label>
+          <label className="onboarding-label">{t('settings.port')}</label>
           <input
             className="onboarding-input"
             type="number"
@@ -122,7 +130,7 @@ export default function HASetupStep({ onComplete, initialHA }: Props) {
       </div>
 
       <div className="onboarding-field">
-        <label className="onboarding-label">Long-Lived Access Token</label>
+        <label className="onboarding-label">{t('onboarding.longLivedToken')}</label>
         <input
           className="onboarding-input"
           type="password"
@@ -131,7 +139,7 @@ export default function HASetupStep({ onComplete, initialHA }: Props) {
           onChange={(e) => { setToken(e.target.value); setStatus('idle'); }}
         />
         <p>
-          Generate one in Home Assistant: Profile &gt; Security &gt; Long-lived access tokens
+          {t('onboarding.generateToken')}
         </p>
       </div>
 
@@ -141,21 +149,21 @@ export default function HASetupStep({ onComplete, initialHA }: Props) {
           onClick={handleTest}
           disabled={!url || !token}
         >
-          Test Connection
+          {t('onboarding.testConnection')}
         </button>
         <button
           className="onboarding-btn primary"
           onClick={handleSave}
           disabled={!url || !token || saving}
         >
-          {saving ? 'Saving...' : 'Save & Continue'}
+          {saving ? t('onboarding.saving') : t('onboarding.saveContinue')}
         </button>
       </div>
 
       {status !== 'idle' && (
         <div className={`onboarding-status ${status}`}>
-          {status === 'testing' && 'Testing connection...'}
-          {status === 'success' && '\u2713 Connected successfully'}
+          {status === 'testing' && t('onboarding.testingConnection')}
+          {status === 'success' && `\u2713 ${t('onboarding.connectedSuccessfully')}`}
           {status === 'error' && `\u2717 ${errorMsg}`}
         </div>
       )}

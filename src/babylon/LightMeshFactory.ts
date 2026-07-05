@@ -6,10 +6,12 @@ import {
   Vector3,
   PointLight,
   ShadowGenerator,
+  Quaternion,
   type Mesh,
   type AbstractMesh,
+  type Node,
 } from '@babylonjs/core';
-import type { LightConfig, LightPart, LightSize } from '../types';
+import type { LightConfig, LightPart, LightPosition, LightSize } from '../types';
 
 export interface LightMeshEntry {
   bulb: Mesh;
@@ -46,13 +48,15 @@ export interface CreateLightMeshOptions {
   stripConfig?: StripConfig;
   singleRange?: number;
   shadowResolution?: number;
+  parent?: Node;
+  sceneScale?: number;
 }
 
 /** Minimum ratio between longest and shortest cube dimension to be treated as a strip. */
 const STRIP_RATIO = 3;
 
 /**
- * Create a light mesh (sphere or cube) with optional PointLight(s) and shadow generator.
+ * Create a light mesh (sphere, ellipsoid, or cube) with optional PointLight(s) and shadow generator.
  * Long thin cubes are detected as LED strips and get multiple sub-lights.
  */
 export function createLightMesh(
@@ -61,8 +65,9 @@ export function createLightMesh(
   id: string,
   options: CreateLightMeshOptions = {},
 ): LightMeshEntry {
-  const { withPointLight = false, shadowCasters, stripConfig, singleRange, shadowResolution } = options;
+  const { withPointLight = false, shadowCasters, stripConfig, singleRange, shadowResolution, parent, sceneScale = 1 } = options;
   const sc = stripConfig ?? DEFAULT_STRIP_CONFIG;
+  const canCreateShadow = !!shadowCasters?.length && shadowResolution !== 0;
   const pos = new Vector3(cfg.position.x, cfg.position.y, cfg.position.z);
 
   const mat = new StandardMaterial(`bulbmat_${id}`, scene);
@@ -92,18 +97,9 @@ export function createLightMesh(
   } else {
     const shape = cfg.shape || 'sphere';
     const sz = cfg.size || {};
-    if (shape === 'cube') {
-      bulb = MeshBuilder.CreateBox(`bulb_${id}`, {
-        width: sz.width ?? 0.3,
-        height: sz.height ?? 0.3,
-        depth: sz.depth ?? 0.3,
-      }, scene);
-    } else {
-      bulb = MeshBuilder.CreateSphere(`bulb_${id}`, {
-        diameter: sz.diameter ?? 0.25,
-      }, scene);
-    }
+    bulb = createShapeMesh(scene, `bulb_${id}`, shape, sz);
     bulb.position = pos.clone();
+    applyTransform(bulb, cfg.rotation, cfg.scale);
     bulb.metadata = { entityId: cfg.entityId };
     bulb.material = mat;
     bulb.applyFog = false;
@@ -116,28 +112,26 @@ export function createLightMesh(
   if (withPointLight) {
     const singleShape = cfg.shape || 'sphere';
     const singleSz = cfg.size || {};
+    const effectiveSingleSz = applySizeScale(singleSz, cfg.scale);
     // Detect strip shape: cube with one dimension >= STRIP_RATIO × the smallest
-    const isStrip = !hasParts && singleShape === 'cube' && detectStrip(singleSz);
+    const isStrip = !hasParts && singleShape === 'cube' && detectStrip(effectiveSingleSz);
 
     if (isStrip) {
       // Create multiple sub-lights along the strip
-      const stripInfo = getStripAxis(singleSz);
+      const stripInfo = getStripAxis(effectiveSingleSz);
       const count = Math.max(2, Math.min(sc.maxLights, Math.ceil(stripInfo.length / sc.spacing)));
       const halfLen = stripInfo.length / 2;
+      const axisVector = getAxisVector(stripInfo.axis);
 
       for (let i = 0; i < count; i++) {
         const t = count === 1 ? 0 : (i / (count - 1)) * 2 - 1; // -1 to +1
         const offset = t * halfLen;
-        const lightPos = pos.clone();
-
-        if (stripInfo.axis === 'x') lightPos.x += offset;
-        else if (stripInfo.axis === 'y') lightPos.y += offset;
-        else lightPos.z += offset;
+        const lightPos = pos.add(rotateVector(axisVector.scale(offset), cfg.rotation));
 
         const pl = new PointLight(`pl_${id}_${i}`, lightPos, scene);
         pl.intensity = 0;
         pl.setEnabled(false);
-        pl.range = sc.range;
+        pl.range = sc.range * sceneScale;
         pl.diffuse = new Color3(1, 0.9, 0.7);
         stripLights.push(pl);
       }
@@ -148,19 +142,19 @@ export function createLightMesh(
       // Shadow generator on the center sub-light only (best coverage, cheaper)
       const centerIdx = Math.floor(count / 2);
       const shadowLight = stripLights[centerIdx];
-      if (shadowCasters && shadowCasters.length > 0) {
-        shadowGen = createPointShadowGen(shadowLight, shadowCasters, shadowResolution);
+      if (canCreateShadow) {
+        shadowGen = createPointShadowGen(shadowLight, shadowCasters!, shadowResolution);
       }
     } else {
       // Single point light at entity position
       pointLight = new PointLight(`pl_${id}`, pos, scene);
       pointLight.intensity = 0;
       pointLight.setEnabled(false);
-      pointLight.range = singleRange ?? 7;
+      pointLight.range = (singleRange ?? 7) * sceneScale;
       pointLight.diffuse = new Color3(1, 0.9, 0.7);
 
-      if (shadowCasters && shadowCasters.length > 0) {
-        shadowGen = createPointShadowGen(pointLight, shadowCasters, shadowResolution);
+      if (canCreateShadow) {
+        shadowGen = createPointShadowGen(pointLight, shadowCasters!, shadowResolution);
       }
     }
   }
@@ -173,21 +167,12 @@ export function createLightMesh(
     if (cfg.hitbox) {
       const hbShape = cfg.hitbox.shape;
       const hbSz = cfg.hitbox.size || {};
-      if (hbShape === 'cube') {
-        hitboxMesh = MeshBuilder.CreateBox(`hitbox_${id}`, {
-          width: hbSz.width ?? 0.5,
-          height: hbSz.height ?? 0.5,
-          depth: hbSz.depth ?? 0.5,
-        }, scene);
-      } else {
-        hitboxMesh = MeshBuilder.CreateSphere(`hitbox_${id}`, {
-          diameter: hbSz.diameter ?? 0.5,
-        }, scene);
-      }
+      hitboxMesh = createShapeMesh(scene, `hitbox_${id}`, hbShape, hbSz, { sphere: 0.5, box: 0.5 });
       const hbPos = cfg.hitbox.position
         ? new Vector3(cfg.hitbox.position.x, cfg.hitbox.position.y, cfg.hitbox.position.z)
         : pos.clone();
       hitboxMesh.position = hbPos;
+      applyTransform(hitboxMesh, cfg.hitbox.rotation, cfg.hitbox.scale);
     } else {
       // Auto-create bounding-box hitbox for multi-part lights
       const bounds = computePartsBounds(cfg.parts!);
@@ -213,7 +198,17 @@ export function createLightMesh(
     bulb.isPickable = false;
   }
 
-  return { bulb, extraBulbs, mat, light: pointLight, stripLights, shadowGen, hitboxMesh, hitboxMat };
+  const entry = { bulb, extraBulbs, mat, light: pointLight, stripLights, shadowGen, hitboxMesh, hitboxMat };
+  if (parent) parentLightEntry(entry, parent);
+  return entry;
+}
+
+function parentLightEntry(entry: LightMeshEntry, parent: Node): void {
+  entry.bulb.parent = parent;
+  for (const mesh of entry.extraBulbs) mesh.parent = parent;
+  if (entry.hitboxMesh) entry.hitboxMesh.parent = parent;
+  if (entry.light) entry.light.parent = parent;
+  for (const light of entry.stripLights) light.parent = parent;
 }
 
 /** Create a shadow generator for a PointLight. */
@@ -234,6 +229,37 @@ function createPointShadowGen(
   return sg;
 }
 
+/** Create a primitive mesh for a configured light shape. */
+function createShapeMesh(
+  scene: Scene,
+  name: string,
+  shape: LightPart['shape'],
+  size: LightSize,
+  fallback: { sphere: number; box: number } = { sphere: 0.25, box: 0.3 },
+): Mesh {
+  if (shape === 'cube') {
+    return MeshBuilder.CreateBox(name, {
+      width: size.width ?? fallback.box,
+      height: size.height ?? fallback.box,
+      depth: size.depth ?? fallback.box,
+    }, scene);
+  }
+
+  if (shape === 'ellipsoid') {
+    const mesh = MeshBuilder.CreateSphere(name, { diameter: 1 }, scene);
+    mesh.scaling = new Vector3(
+      size.width ?? size.diameter ?? fallback.box,
+      size.height ?? size.diameter ?? fallback.box,
+      size.depth ?? size.diameter ?? fallback.box,
+    );
+    return mesh;
+  }
+
+  return MeshBuilder.CreateSphere(name, {
+    diameter: size.diameter ?? fallback.sphere,
+  }, scene);
+}
+
 /** Create a single part mesh with shared material. */
 function createPartMesh(
   scene: Scene,
@@ -243,19 +269,9 @@ function createPartMesh(
   entityId: string,
 ): Mesh {
   const sz = part.size || {};
-  let mesh: Mesh;
-  if (part.shape === 'cube') {
-    mesh = MeshBuilder.CreateBox(name, {
-      width: sz.width ?? 0.3,
-      height: sz.height ?? 0.3,
-      depth: sz.depth ?? 0.3,
-    }, scene);
-  } else {
-    mesh = MeshBuilder.CreateSphere(name, {
-      diameter: sz.diameter ?? 0.25,
-    }, scene);
-  }
+  const mesh = createShapeMesh(scene, name, part.shape, sz);
   mesh.position = new Vector3(part.position.x, part.position.y, part.position.z);
+  applyTransform(mesh, part.rotation, part.scale);
   mesh.metadata = { entityId };
   mesh.material = mat;
   mesh.applyFog = false;
@@ -267,10 +283,10 @@ function computePartsBounds(parts: LightPart[]): { center: Vector3; size: Vector
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
   for (const p of parts) {
-    const sz = p.size || {};
-    const hw = (p.shape === 'cube' ? (sz.width ?? 0.3) : (sz.diameter ?? 0.25)) / 2;
-    const hh = (p.shape === 'cube' ? (sz.height ?? 0.3) : (sz.diameter ?? 0.25)) / 2;
-    const hd = (p.shape === 'cube' ? (sz.depth ?? 0.3) : (sz.diameter ?? 0.25)) / 2;
+    const dimensions = getShapeDimensions(p.shape, p.size || {}).multiply(vectorFromScale(p.scale));
+    const hw = dimensions.x / 2;
+    const hh = dimensions.y / 2;
+    const hd = dimensions.z / 2;
     minX = Math.min(minX, p.position.x - hw);
     maxX = Math.max(maxX, p.position.x + hw);
     minY = Math.min(minY, p.position.y - hh);
@@ -282,6 +298,70 @@ function computePartsBounds(parts: LightPart[]): { center: Vector3; size: Vector
     center: new Vector3((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2),
     size: new Vector3(maxX - minX, maxY - minY, maxZ - minZ),
   };
+}
+
+function applyTransform(mesh: Mesh, rotation?: LightPosition, scale?: LightPosition): void {
+  if (rotation) {
+    mesh.rotation.set(toRadians(rotation.x), toRadians(rotation.y), toRadians(rotation.z));
+  }
+  if (scale) {
+    const safeScale = vectorFromScale(scale);
+    mesh.scaling.multiplyInPlace(safeScale);
+  }
+}
+
+function applySizeScale(size: LightSize, scale?: LightPosition): LightSize {
+  if (!scale) return size;
+  const safeScale = vectorFromScale(scale);
+  return {
+    diameter: size.diameter !== undefined ? size.diameter * Math.max(safeScale.x, safeScale.y, safeScale.z) : undefined,
+    width: (size.width ?? size.diameter) !== undefined ? (size.width ?? size.diameter)! * safeScale.x : undefined,
+    height: (size.height ?? size.diameter) !== undefined ? (size.height ?? size.diameter)! * safeScale.y : undefined,
+    depth: (size.depth ?? size.diameter) !== undefined ? (size.depth ?? size.diameter)! * safeScale.z : undefined,
+  };
+}
+
+function vectorFromScale(scale?: LightPosition): Vector3 {
+  return new Vector3(
+    Math.max(0.001, scale?.x ?? 1),
+    Math.max(0.001, scale?.y ?? 1),
+    Math.max(0.001, scale?.z ?? 1),
+  );
+}
+
+function rotateVector(vector: Vector3, rotation?: LightPosition): Vector3 {
+  if (!rotation) return vector;
+  const q = Quaternion.FromEulerAngles(
+    toRadians(rotation.x),
+    toRadians(rotation.y),
+    toRadians(rotation.z),
+  );
+  const result = new Vector3();
+  vector.rotateByQuaternionToRef(q, result);
+  return result;
+}
+
+function getAxisVector(axis: 'x' | 'y' | 'z'): Vector3 {
+  if (axis === 'x') return new Vector3(1, 0, 0);
+  if (axis === 'y') return new Vector3(0, 1, 0);
+  return new Vector3(0, 0, 1);
+}
+
+function toRadians(value: number): number {
+  return (value * Math.PI) / 180;
+}
+
+function getShapeDimensions(shape: LightPart['shape'], size: LightSize): Vector3 {
+  if (shape === 'sphere') {
+    const diameter = size.diameter ?? 0.25;
+    return new Vector3(diameter, diameter, diameter);
+  }
+
+  return new Vector3(
+    size.width ?? size.diameter ?? 0.3,
+    size.height ?? size.diameter ?? 0.3,
+    size.depth ?? size.diameter ?? 0.3,
+  );
 }
 
 /** Check if cube dimensions qualify as a strip (one axis ≥ STRIP_RATIO × smallest). */

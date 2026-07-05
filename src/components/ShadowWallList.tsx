@@ -1,4 +1,5 @@
 import type { ShadowWallConfig } from '../types';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface Props {
   walls: ShadowWallConfig[];
@@ -9,11 +10,13 @@ interface Props {
 }
 
 export default function ShadowWallList({ walls, selectedIdx, onSelect, onDelete, onDuplicate }: Props) {
+  const t = useTranslation();
+
   if (walls.length === 0) {
     return (
       <div className="list-empty">
-        No shadow walls configured.<br />
-        Click <strong>Add Wall</strong> to place one.
+        {t('list.noWalls')}<br />
+        <span dangerouslySetInnerHTML={{ __html: t('list.clickAddWall') }} />
       </div>
     );
   }
@@ -35,7 +38,7 @@ export default function ShadowWallList({ walls, selectedIdx, onSelect, onDelete,
           </div>
           <button
             className="light-item-dup"
-            title="Duplicate"
+            title={t('common.duplicate')}
             onClick={(e) => {
               e.stopPropagation();
               onDuplicate(i);

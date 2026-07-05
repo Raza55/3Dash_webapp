@@ -8,16 +8,19 @@ import {
 } from 'lucide-react';
 import { buildWsUrl, type HAConnectionStatus } from '../services/haWebSocket';
 import type { HASettings } from '../types';
-import { getConfig, resetConfig, updateConfig, exportBackup, importBackup } from '../services/configApi';
+import { getConfig, resetConfig, updateConfig, exportBackup, importBackup, uploadModel } from '../services/configApi';
 import { clearSettings, getSetting, getSettings, updateSettings } from '../services/settingsStore';
+import { MODEL_SCALE_MAX, MODEL_SCALE_MIN, normalizeModelScale } from '../babylon/SceneScale';
 import { useDemoMode } from '../contexts/DemoModeContext';
 import { useCameraControls, type CameraControlsFlags } from '../contexts/CameraControlsContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import {
   useTheme,
   BG_DARK, BG_LIGHT,
   PRIMARY_ACCENTS, STATUS_ACCENTS,
   PANEL_BG_DARK, PANEL_BG_LIGHT,
 } from '../contexts/ThemeContext';
+import { SYSTEM_LOCATION } from '../constants/location';
 import './SettingsModal.css';
 
 type Section = 'main' | 'connection' | 'appearance' | 'render' | 'environment' | 'controls' | 'system' | 'infos';
@@ -64,6 +67,7 @@ interface Props {
   /* Textures */
   showTextures: boolean;
   onShowTexturesChange: (enabled: boolean) => void;
+  onRecenterView: () => void;
 
   /* Sketch material */
   sketchColor: string;
@@ -91,14 +95,14 @@ interface Props {
   modelStatusColor?: string;
 }
 
-const SECTIONS: { key: Section; label: string; icon: typeof Server }[] = [
-  { key: 'connection', label: 'Connection', icon: Server },
-  { key: 'appearance', label: 'Appearance', icon: Palette },
-  { key: 'render', label: 'Render', icon: Box },
-  { key: 'environment', label: 'Environment', icon: MonitorCloud },
-  { key: 'controls', label: 'Controls', icon: Hand },
-  { key: 'system', label: 'System', icon: Cog },
-  { key: 'infos', label: 'Infos', icon: Info },
+const SECTIONS: { key: Section; labelKey: string; icon: typeof Server }[] = [
+  { key: 'connection', labelKey: 'settings.connection', icon: Server },
+  { key: 'appearance', labelKey: 'settings.appearance', icon: Palette },
+  { key: 'render', labelKey: 'settings.render', icon: Box },
+  { key: 'environment', labelKey: 'settings.environment', icon: MonitorCloud },
+  { key: 'controls', labelKey: 'settings.controls', icon: Hand },
+  { key: 'system', labelKey: 'settings.system', icon: Cog },
+  { key: 'infos', labelKey: 'settings.infos', icon: Info },
 ];
 
 export default function SettingsModal({
@@ -127,6 +131,7 @@ export default function SettingsModal({
   onPointShadowResChange,
   showTextures,
   onShowTexturesChange,
+  onRecenterView,
   sketchColor,
   onSketchColorChange,
   sketchSpecular,
@@ -145,6 +150,7 @@ export default function SettingsModal({
   const { demoMode, setDemoMode } = useDemoMode();
   const { desktop, mobile, toggleDesktop, toggleMobile } = useCameraControls();
   const { theme, resolved, setTheme, refreshAppearance } = useTheme();
+  const { language, languages, setLanguage, t } = useLanguage();
 
   const [section, setSection] = useState<Section>('main');
   const [prevSection, setPrevSection] = useState<Section>('main');
@@ -159,7 +165,11 @@ export default function SettingsModal({
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
   const importInputRef = useRef<HTMLInputElement>(null);
+  const modelInputRef = useRef<HTMLInputElement>(null);
   const [importStatus, setImportStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [modelReplaceStatus, setModelReplaceStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [modelScaleValue, setModelScaleValue] = useState('1');
+  const [modelScaleStatus, setModelScaleStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [homeViewReset, setHomeViewReset] = useState<'idle' | 'done'>('idle');
 
   // Appearance state
@@ -206,8 +216,11 @@ export default function SettingsModal({
       setConfirmReset(false);
       setBodyHeight(undefined);
       const cfg = getConfig();
-      setLatitude(String(cfg.location?.latitude ?? 43.6077));
-      setLongitude(String(cfg.location?.longitude ?? 3.8766));
+      setLatitude(String(cfg.location?.latitude ?? SYSTEM_LOCATION.latitude));
+      setLongitude(String(cfg.location?.longitude ?? SYSTEM_LOCATION.longitude));
+      setModelScaleValue(String(normalizeModelScale(cfg.model?.scale)));
+      setModelReplaceStatus('idle');
+      setModelScaleStatus('idle');
     }
   }, [open]);
 
@@ -239,8 +252,16 @@ export default function SettingsModal({
     if (!haUrl || !haToken) return;
     setHaSaveStatus('testing');
 
-    const ws = new WebSocket(buildWsUrl(haUrl, haPort));
     const resetError = () => setTimeout(() => setHaSaveStatus('idle'), 3000);
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(buildWsUrl(haUrl, haPort));
+    } catch {
+      setHaSaveStatus('error');
+      resetError();
+      return;
+    }
+
     const timeout = setTimeout(() => {
       ws.close();
       setHaSaveStatus('error');
@@ -304,9 +325,9 @@ export default function SettingsModal({
   }, []);
 
   const controlItems: { key: keyof CameraControlsFlags; icon: typeof Search; label: string }[] = [
-    { key: 'zoom', icon: Search, label: 'Zoom' },
-    { key: 'rotate', icon: RotateCw, label: 'Rotate' },
-    { key: 'pan', icon: Move, label: 'Pan' },
+    { key: 'zoom', icon: Search, label: t('settings.zoom') },
+    { key: 'rotate', icon: RotateCw, label: t('settings.rotate') },
+    { key: 'pan', icon: Move, label: t('settings.pan') },
   ];
 
   const handleBackdropClick = useCallback(
@@ -316,6 +337,45 @@ export default function SettingsModal({
     [onClose],
   );
 
+  const handleApplyModelScale = useCallback(() => {
+    try {
+      const cfg = getConfig();
+      const nextScale = normalizeModelScale(modelScaleValue);
+      setModelScaleValue(String(nextScale));
+      updateConfig({
+        model: {
+          ...cfg.model,
+          scale: nextScale,
+          objectOverrides: cfg.model?.objectOverrides ?? [],
+        },
+      });
+      setModelScaleStatus('success');
+      setTimeout(() => window.location.reload(), 700);
+    } catch {
+      setModelScaleStatus('error');
+      setTimeout(() => setModelScaleStatus('idle'), 3000);
+    }
+  }, [modelScaleValue]);
+
+  const handleReplaceModel = useCallback(async (file: File) => {
+    try {
+      await uploadModel(file);
+      const cfg = getConfig();
+      updateConfig({
+        model: {
+          ...cfg.model,
+          scale: normalizeModelScale(cfg.model?.scale),
+          objectOverrides: [],
+        },
+      });
+      setModelReplaceStatus('success');
+      setTimeout(() => window.location.reload(), 800);
+    } catch {
+      setModelReplaceStatus('error');
+      setTimeout(() => setModelReplaceStatus('idle'), 3000);
+    }
+  }, []);
+
   const haStatusColor =
     haStatus === 'connected' ? 'var(--green)' :
     haStatus === 'error' || haStatus === 'auth_error' ? 'var(--red)' :
@@ -323,13 +383,13 @@ export default function SettingsModal({
     undefined;
 
   const haStatusText =
-    haStatus === 'auth_error' ? 'auth error' :
-    haStatus === 'disconnected' ? 'reconnecting...' :
+    haStatus === 'auth_error' ? t('settings.authError') :
+    haStatus === 'disconnected' ? t('settings.reconnecting') :
     haStatus;
 
   if (!open) return null;
 
-  const sectionTitle = SECTIONS.find(s => s.key === section)?.label ?? 'Settings';
+  const sectionTitle = t(SECTIONS.find(s => s.key === section)?.labelKey ?? 'settings.title');
 
   return (
     <div className="settings-backdrop" onClick={handleBackdropClick}>
@@ -342,7 +402,7 @@ export default function SettingsModal({
             </button>
           ) : null}
           <span className="settings-title">
-            {section === 'main' ? 'Settings' : sectionTitle}
+            {section === 'main' ? t('settings.title') : sectionTitle}
           </span>
           <button className="settings-close-btn" onClick={onClose}>
             <X size={16} />
@@ -364,14 +424,14 @@ export default function SettingsModal({
           >
             <div className="settings-main">
               <div className="settings-list">
-                {SECTIONS.map(({ key, label, icon: Icon }) => (
+                {SECTIONS.map(({ key, labelKey, icon: Icon }) => (
                   <button
                     key={key}
                     className="settings-list-item"
                     onClick={() => navigateTo(key)}
                   >
                     <Icon size={18} strokeWidth={1.5} />
-                    <span>{label}</span>
+                    <span>{t(labelKey)}</span>
                   </button>
                 ))}
               </div>
@@ -383,14 +443,14 @@ export default function SettingsModal({
                   onClick={onClose}
                 >
                   <Lightbulb size={20} strokeWidth={1.5} />
-                  <span>Edit Lights</span>
+                  <span>{t('settings.editLights')}</span>
                 </Link>
                 <button
                   className="settings-big-btn"
                   onClick={() => { onEditGrid(); onClose(); }}
                 >
                   <LayoutTemplate size={20} strokeWidth={1.5} />
-                  <span>Edit Grid</span>
+                  <span>{t('settings.editGrid')}</span>
                 </button>
               </div>
             </div>
@@ -406,29 +466,29 @@ export default function SettingsModal({
             {(section === 'connection' || (animating && prevSection === 'connection')) && (
               <div className="settings-page">
                 <div className="settings-section">
-                  <div className="settings-section-label">Mode</div>
+                  <div className="settings-section-label">{t('settings.mode')}</div>
                   <div className="settings-mode-toggle">
                     <button
                       className={`settings-mode-btn${!demoMode ? ' active live' : ''}`}
                       onClick={() => setDemoMode(false)}
                     >
-                      Live
+                      {t('settings.live')}
                     </button>
                     <button
                       className={`settings-mode-btn${demoMode ? ' active demo' : ''}`}
                       onClick={() => setDemoMode(true)}
                     >
-                      Demo
+                      {t('settings.demo')}
                     </button>
                   </div>
                 </div>
 
                 <div className="settings-section">
-                  <div className="settings-section-label">Home Assistant</div>
+                  <div className="settings-section-label">{t('settings.homeAssistant')}</div>
                   <div className="settings-ha-fields">
                     <div className="settings-ha-row">
                       <div className="settings-ha-field" style={{ flex: 3 }}>
-                        <label className="settings-ha-label">URL</label>
+                        <label className="settings-ha-label">{t('settings.url')}</label>
                         <input
                           className="settings-ha-input"
                           type="text"
@@ -438,7 +498,7 @@ export default function SettingsModal({
                         />
                       </div>
                       <div className="settings-ha-field" style={{ flex: 1 }}>
-                        <label className="settings-ha-label">Port</label>
+                        <label className="settings-ha-label">{t('settings.port')}</label>
                         <input
                           className="settings-ha-input"
                           type="number"
@@ -448,7 +508,7 @@ export default function SettingsModal({
                       </div>
                     </div>
                     <div className="settings-ha-field">
-                      <label className="settings-ha-label">Token</label>
+                      <label className="settings-ha-label">{t('settings.token')}</label>
                       <input
                         className="settings-ha-input"
                         type="password"
@@ -462,10 +522,10 @@ export default function SettingsModal({
                       disabled={!haUrl || !haToken || haSaveStatus === 'testing'}
                       onClick={handleHASave}
                     >
-                      {haSaveStatus === 'testing' ? 'Testing...'
-                        : haSaveStatus === 'success' ? '\u2713 Connected'
-                        : haSaveStatus === 'error' ? '\u2717 Failed'
-                        : 'Save'}
+                      {haSaveStatus === 'testing' ? t('common.testing')
+                        : haSaveStatus === 'success' ? `\u2713 ${t('common.connected')}`
+                        : haSaveStatus === 'error' ? `\u2717 ${t('common.failed')}`
+                        : t('common.save')}
                     </button>
                   </div>
                 </div>
@@ -477,18 +537,33 @@ export default function SettingsModal({
               <div className="settings-page">
                 {/* Theme */}
                 <div className="settings-section">
-                  <div className="settings-section-label">Theme</div>
+                  <div className="settings-section-label">{t('settings.theme')}</div>
                   <div className="settings-mode-toggle">
-                    <button className={`settings-mode-btn${theme === 'dark' ? ' active' : ''}`} onClick={() => setTheme('dark')}>Dark</button>
-                    <button className={`settings-mode-btn${theme === 'light' ? ' active' : ''}`} onClick={() => setTheme('light')}>Light</button>
-                    <button className={`settings-mode-btn${theme === 'auto' ? ' active' : ''}`} onClick={() => setTheme('auto')}>Day/Night</button>
-                    <button className={`settings-mode-btn${theme === 'system' ? ' active' : ''}`} onClick={() => setTheme('system')}>System</button>
+                    <button className={`settings-mode-btn${theme === 'dark' ? ' active' : ''}`} onClick={() => setTheme('dark')}>{t('settings.dark')}</button>
+                    <button className={`settings-mode-btn${theme === 'light' ? ' active' : ''}`} onClick={() => setTheme('light')}>{t('settings.light')}</button>
+                    <button className={`settings-mode-btn${theme === 'auto' ? ' active' : ''}`} onClick={() => setTheme('auto')}>{t('settings.dayNight')}</button>
+                    <button className={`settings-mode-btn${theme === 'system' ? ' active' : ''}`} onClick={() => setTheme('system')}>{t('settings.systemTheme')}</button>
+                  </div>
+                </div>
+
+                <div className="settings-section">
+                  <div className="settings-section-label">{t('settings.language')}</div>
+                  <div className="settings-mode-toggle">
+                    {languages.map((lang) => (
+                      <button
+                        key={lang}
+                        className={`settings-mode-btn${language === lang ? ' active' : ''}`}
+                        onClick={() => setLanguage(lang)}
+                      >
+                        {t(`language.${lang}`)}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
                 {/* Background */}
                 <div className="settings-section">
-                  <div className="settings-section-label">Background</div>
+                  <div className="settings-section-label">{t('settings.background')}</div>
                   <div className="settings-swatch-row">
                     {(resolved === 'dark' ? BG_DARK : BG_LIGHT).map(({ hex, label }) => (
                       <button
@@ -504,7 +579,7 @@ export default function SettingsModal({
 
                 {/* Primary Accent */}
                 <div className="settings-section">
-                  <div className="settings-section-label">Primary Accent</div>
+                  <div className="settings-section-label">{t('settings.primaryAccent')}</div>
                   <div className="settings-swatch-row">
                     {PRIMARY_ACCENTS.map(({ hex, label }) => (
                       <button
@@ -520,7 +595,7 @@ export default function SettingsModal({
 
                 {/* Status Accent */}
                 <div className="settings-section">
-                  <div className="settings-section-label">Status Accent</div>
+                  <div className="settings-section-label">{t('settings.statusAccent')}</div>
                   <div className="settings-swatch-row">
                     {STATUS_ACCENTS.map(({ hex, label }) => (
                       <button
@@ -536,7 +611,7 @@ export default function SettingsModal({
 
                 {/* Panel Background */}
                 <div className="settings-section">
-                  <div className="settings-section-label">Panel Background</div>
+                  <div className="settings-section-label">{t('settings.panelBackground')}</div>
                   <div className="settings-swatch-row">
                     {(resolved === 'dark' ? PANEL_BG_DARK : PANEL_BG_LIGHT).map(({ hex, label }) => (
                       <button
@@ -552,7 +627,7 @@ export default function SettingsModal({
 
                 {/* Side Panel Opacity */}
                 <div className="settings-section">
-                  <div className="settings-section-label">Side Panel Opacity</div>
+                  <div className="settings-section-label">{t('settings.sidePanelOpacity')}</div>
                   <div className="settings-scrubber">
                     <input
                       type="range"
@@ -572,54 +647,54 @@ export default function SettingsModal({
 
                 {/* Panel Dots */}
                 <div className="settings-section">
-                  <div className="settings-section-label">Panel Dots</div>
+                  <div className="settings-section-label">{t('settings.panelDots')}</div>
                   <div className="settings-mode-toggle">
-                    <button className={`settings-mode-btn${panelDots ? ' active' : ''}`} onClick={() => { setPanelDots(true); updateAppearance({ panelDots: true }); }}>On</button>
-                    <button className={`settings-mode-btn${!panelDots ? ' active' : ''}`} onClick={() => { setPanelDots(false); updateAppearance({ panelDots: false }); }}>Off</button>
+                    <button className={`settings-mode-btn${panelDots ? ' active' : ''}`} onClick={() => { setPanelDots(true); updateAppearance({ panelDots: true }); }}>{t('common.on')}</button>
+                    <button className={`settings-mode-btn${!panelDots ? ' active' : ''}`} onClick={() => { setPanelDots(false); updateAppearance({ panelDots: false }); }}>{t('common.off')}</button>
                   </div>
                 </div>
 
                 {/* Border Style */}
                 <div className="settings-section">
-                  <div className="settings-section-label">Borders</div>
+                  <div className="settings-section-label">{t('settings.borders')}</div>
                   <div className="settings-mode-toggle">
-                    <button className={`settings-mode-btn${borderStyle === 'subtle' ? ' active' : ''}`} onClick={() => { setBorderStyle('subtle'); updateAppearance({ borderStyle: 'subtle' }); }}>Subtle</button>
-                    <button className={`settings-mode-btn${borderStyle === 'large' ? ' active' : ''}`} onClick={() => { setBorderStyle('large'); updateAppearance({ borderStyle: 'large' }); }}>Large</button>
-                    <button className={`settings-mode-btn${borderStyle === 'none' ? ' active' : ''}`} onClick={() => { setBorderStyle('none'); updateAppearance({ borderStyle: 'none' }); }}>None</button>
+                    <button className={`settings-mode-btn${borderStyle === 'subtle' ? ' active' : ''}`} onClick={() => { setBorderStyle('subtle'); updateAppearance({ borderStyle: 'subtle' }); }}>{t('settings.subtle')}</button>
+                    <button className={`settings-mode-btn${borderStyle === 'large' ? ' active' : ''}`} onClick={() => { setBorderStyle('large'); updateAppearance({ borderStyle: 'large' }); }}>{t('settings.large')}</button>
+                    <button className={`settings-mode-btn${borderStyle === 'none' ? ' active' : ''}`} onClick={() => { setBorderStyle('none'); updateAppearance({ borderStyle: 'none' }); }}>{t('settings.none')}</button>
                   </div>
                 </div>
 
                 {/* Corner Radius */}
                 <div className="settings-section">
-                  <div className="settings-section-label">Corner Radius</div>
+                  <div className="settings-section-label">{t('settings.cornerRadius')}</div>
                   <div className="settings-mode-toggle">
-                    <button className={`settings-mode-btn${cornerRadius === 'sharp' ? ' active' : ''}`} onClick={() => { setCornerRadius('sharp'); updateAppearance({ cornerRadius: 'sharp' }); }}>Sharp</button>
-                    <button className={`settings-mode-btn${cornerRadius === 'soft' ? ' active' : ''}`} onClick={() => { setCornerRadius('soft'); updateAppearance({ cornerRadius: 'soft' }); }}>Soft</button>
-                    <button className={`settings-mode-btn${cornerRadius === 'round' ? ' active' : ''}`} onClick={() => { setCornerRadius('round'); updateAppearance({ cornerRadius: 'round' }); }}>Round</button>
+                    <button className={`settings-mode-btn${cornerRadius === 'sharp' ? ' active' : ''}`} onClick={() => { setCornerRadius('sharp'); updateAppearance({ cornerRadius: 'sharp' }); }}>{t('settings.sharp')}</button>
+                    <button className={`settings-mode-btn${cornerRadius === 'soft' ? ' active' : ''}`} onClick={() => { setCornerRadius('soft'); updateAppearance({ cornerRadius: 'soft' }); }}>{t('settings.soft')}</button>
+                    <button className={`settings-mode-btn${cornerRadius === 'round' ? ' active' : ''}`} onClick={() => { setCornerRadius('round'); updateAppearance({ cornerRadius: 'round' }); }}>{t('settings.round')}</button>
                   </div>
                 </div>
 
                 {/* Backdrop */}
                 <div className="settings-section">
-                  <div className="settings-section-label">Backdrop</div>
+                  <div className="settings-section-label">{t('settings.backdrop')}</div>
                   <div className="settings-checkbox-group">
                     <label className="settings-checkbox">
                       <input type="checkbox" checked={backdropObscure} onChange={(e) => { setBackdropObscure(e.target.checked); updateAppearance({ backdropObscure: e.target.checked }); }} />
-                      <span>Obscure</span>
+                      <span>{t('settings.obscure')}</span>
                     </label>
                     <label className="settings-checkbox">
                       <input type="checkbox" checked={backdropBlur} onChange={(e) => { setBackdropBlur(e.target.checked); updateAppearance({ backdropBlur: e.target.checked }); }} />
-                      <span>Blur</span>
+                      <span>{t('settings.blur')}</span>
                     </label>
                   </div>
                 </div>
 
                 {/* HUD */}
                 <div className="settings-section">
-                  <div className="settings-section-label">HUD</div>
+                  <div className="settings-section-label">{t('settings.hud')}</div>
                   <div className="settings-mode-toggle">
-                    <button className={`settings-mode-btn${hudVisible ? ' active' : ''}`} onClick={() => { setHudVisible(true); updateAppearance({ hudVisible: true }); }}>Visible</button>
-                    <button className={`settings-mode-btn${!hudVisible ? ' active' : ''}`} onClick={() => { setHudVisible(false); updateAppearance({ hudVisible: false }); }}>Hidden</button>
+                    <button className={`settings-mode-btn${hudVisible ? ' active' : ''}`} onClick={() => { setHudVisible(true); updateAppearance({ hudVisible: true }); }}>{t('common.visible')}</button>
+                    <button className={`settings-mode-btn${!hudVisible ? ' active' : ''}`} onClick={() => { setHudVisible(false); updateAppearance({ hudVisible: false }); }}>{t('common.hidden')}</button>
                   </div>
                 </div>
 
@@ -630,19 +705,25 @@ export default function SettingsModal({
             {(section === 'render' || (animating && prevSection === 'render')) && (
               <div className="settings-page">
                 <div className="settings-section">
-                  <div className="settings-section-label">Textures</div>
+                  <div className="settings-section-label">{t('settings.textures')}</div>
                   <div className="settings-mode-toggle">
                     <button
                       className={`settings-mode-btn${showTextures ? ' active' : ''}`}
                       onClick={() => onShowTexturesChange(true)}
                     >
-                      On
+                      {t('common.on')}
                     </button>
                     <button
                       className={`settings-mode-btn${!showTextures ? ' active' : ''}`}
                       onClick={() => onShowTexturesChange(false)}
                     >
-                      Off
+                      {t('common.off')}
+                    </button>
+                    <button
+                      className="settings-mode-btn"
+                      onClick={onRecenterView}
+                    >
+                      {t('common.recenter')}
                     </button>
                   </div>
                 </div>
@@ -650,7 +731,7 @@ export default function SettingsModal({
                 {!showTextures && (
                   <>
                     <div className="settings-section">
-                      <div className="settings-section-label">Sketch Color</div>
+                      <div className="settings-section-label">{t('settings.sketchColor')}</div>
                       <input
                         type="color"
                         className="settings-color-input"
@@ -660,7 +741,7 @@ export default function SettingsModal({
                     </div>
 
                     <div className="settings-section">
-                      <div className="settings-section-label">Sheen</div>
+                      <div className="settings-section-label">{t('settings.sheen')}</div>
                       <div className="settings-scrubber">
                         <input
                           type="range"
@@ -677,25 +758,25 @@ export default function SettingsModal({
                 )}
 
                 <div className="settings-section">
-                  <div className="settings-section-label">Edge Mode</div>
+                  <div className="settings-section-label">{t('settings.edgeMode')}</div>
                   <div className="settings-mode-toggle">
                     <button
                       className={`settings-mode-btn${edgeMode === 'classic' ? ' active' : ''}`}
                       onClick={() => onEdgeModeChange('classic')}
                     >
-                      Classic
+                      {t('settings.classic')}
                     </button>
                     <button
                       className={`settings-mode-btn${edgeMode === 'enhanced' ? ' active' : ''}`}
                       onClick={() => onEdgeModeChange('enhanced')}
                     >
-                      Enhanced
+                      {t('settings.enhanced')}
                     </button>
                   </div>
                 </div>
 
                 <div className="settings-section">
-                  <div className="settings-section-label">Edge Width</div>
+                  <div className="settings-section-label">{t('settings.edgeWidth')}</div>
                   <div className="settings-scrubber">
                     <input
                       type="range"
@@ -710,43 +791,43 @@ export default function SettingsModal({
                 </div>
 
                 <div className="settings-section">
-                  <div className="settings-section-label">Ground Grid</div>
+                  <div className="settings-section-label">{t('settings.groundGrid')}</div>
                   <div className="settings-mode-toggle">
                     <button
                       className={`settings-mode-btn${groundGrid ? ' active' : ''}`}
                       onClick={() => onGroundGridChange(true)}
                     >
-                      On
+                      {t('common.on')}
                     </button>
                     <button
                       className={`settings-mode-btn${!groundGrid ? ' active' : ''}`}
                       onClick={() => onGroundGridChange(false)}
                     >
-                      Off
+                      {t('common.off')}
                     </button>
                   </div>
                 </div>
 
                 <div className="settings-section">
-                  <div className="settings-section-label">Perspective</div>
+                  <div className="settings-section-label">{t('settings.perspective')}</div>
                   <div className="settings-mode-toggle">
                     <button
                       className={`settings-mode-btn${perspective ? ' active' : ''}`}
                       onClick={() => onPerspectiveChange(true)}
                     >
-                      On
+                      {t('common.on')}
                     </button>
                     <button
                       className={`settings-mode-btn${!perspective ? ' active' : ''}`}
                       onClick={() => onPerspectiveChange(false)}
                     >
-                      Off
+                      {t('common.off')}
                     </button>
                   </div>
                 </div>
 
                 <div className="settings-section">
-                  <div className="settings-section-label">Sun Shadow</div>
+                  <div className="settings-section-label">{t('settings.sunShadow')}</div>
                   <div className="settings-mode-toggle">
                     {[0, 512, 1024, 2048, 4096].map((res) => (
                       <button
@@ -754,14 +835,14 @@ export default function SettingsModal({
                         className={`settings-mode-btn${sunShadowRes === res ? ' active' : ''}`}
                         onClick={() => onSunShadowResChange(res)}
                       >
-                        {res === 0 ? 'Off' : res}
+                        {res === 0 ? t('common.off') : res}
                       </button>
                     ))}
                   </div>
                 </div>
 
                 <div className="settings-section">
-                  <div className="settings-section-label">Point Shadow</div>
+                  <div className="settings-section-label">{t('settings.pointShadow')}</div>
                   <div className="settings-mode-toggle">
                     {[0, 256, 512, 1024, 2048].map((res) => (
                       <button
@@ -769,7 +850,7 @@ export default function SettingsModal({
                         className={`settings-mode-btn${pointShadowRes === res ? ' active' : ''}`}
                         onClick={() => onPointShadowResChange(res)}
                       >
-                        {res === 0 ? 'Off' : res}
+                        {res === 0 ? t('common.off') : res}
                       </button>
                     ))}
                   </div>
@@ -781,10 +862,10 @@ export default function SettingsModal({
             {(section === 'environment' || (animating && prevSection === 'environment')) && (
               <div className="settings-page">
                 <div className="settings-section">
-                  <div className="settings-section-label">Location</div>
+                  <div className="settings-section-label">{t('settings.location')}</div>
                   <div className="settings-ha-row">
                     <div className="settings-ha-field" style={{ flex: 1 }}>
-                      <label className="settings-ha-label">Latitude</label>
+                      <label className="settings-ha-label">{t('settings.latitude')}</label>
                       <input
                         className="settings-ha-input"
                         type="number"
@@ -800,7 +881,7 @@ export default function SettingsModal({
                       />
                     </div>
                     <div className="settings-ha-field" style={{ flex: 1 }}>
-                      <label className="settings-ha-label">Longitude</label>
+                      <label className="settings-ha-label">{t('settings.longitude')}</label>
                       <input
                         className="settings-ha-input"
                         type="number"
@@ -819,7 +900,7 @@ export default function SettingsModal({
                 </div>
 
                 <div className="settings-section">
-                  <div className="settings-section-label">Sun Position</div>
+                  <div className="settings-section-label">{t('settings.sunPosition')}</div>
                   <div className="settings-scrubber">
                     <input
                       type="range"
@@ -834,13 +915,13 @@ export default function SettingsModal({
                       className={`settings-live-btn${sunLiveMode ? ' active' : ''}`}
                       onClick={onLiveClick}
                     >
-                      Live
+                      {t('settings.live')}
                     </button>
                   </div>
                 </div>
 
                 <div className="settings-section">
-                  <div className="settings-section-label">Model Orientation</div>
+                  <div className="settings-section-label">{t('settings.modelOrientation')}</div>
                   <div className="settings-compass-row">
                     <svg
                       ref={compassRef}
@@ -869,19 +950,19 @@ export default function SettingsModal({
                 </div>
 
                 <div className="settings-section">
-                  <div className="settings-section-label">Weather Effects</div>
+                  <div className="settings-section-label">{t('settings.weatherEffects')}</div>
                   <div className="settings-mode-toggle">
                     <button
                       className={`settings-mode-btn${weatherEnabled ? ' active' : ''}`}
                       onClick={() => onWeatherEnabledChange(true)}
                     >
-                      On
+                      {t('common.on')}
                     </button>
                     <button
                       className={`settings-mode-btn${!weatherEnabled ? ' active' : ''}`}
                       onClick={() => onWeatherEnabledChange(false)}
                     >
-                      Off
+                      {t('common.off')}
                     </button>
                   </div>
                 </div>
@@ -892,16 +973,16 @@ export default function SettingsModal({
             {(section === 'controls' || (animating && prevSection === 'controls')) && (
               <div className="settings-page">
                 <div className="settings-section">
-                  <div className="settings-section-label">Camera Controls</div>
+                  <div className="settings-section-label">{t('settings.cameraControls')}</div>
                   <div className="settings-cam-grid">
                     <div className="settings-cam-row">
                       <Monitor size={16} strokeWidth={1.5} className="settings-cam-device-icon" />
-                      {controlItems.map(({ key, icon: Icon }) => (
+                      {controlItems.map(({ key, icon: Icon, label }) => (
                         <button
                           key={`d-${key}`}
                           className={`settings-cam-btn${desktop[key] ? ' active' : ''}`}
                           onClick={() => toggleDesktop(key)}
-                          title={`${key} (desktop)`}
+                          title={t('settings.desktopTitle', { control: label })}
                         >
                           <Icon size={16} strokeWidth={1.5} />
                         </button>
@@ -909,12 +990,12 @@ export default function SettingsModal({
                     </div>
                     <div className="settings-cam-row">
                       <Smartphone size={16} strokeWidth={1.5} className="settings-cam-device-icon" />
-                      {controlItems.map(({ key, icon: Icon }) => (
+                      {controlItems.map(({ key, icon: Icon, label }) => (
                         <button
                           key={`m-${key}`}
                           className={`settings-cam-btn${mobile[key] ? ' active' : ''}`}
                           onClick={() => toggleMobile(key)}
-                          title={`${key} (mobile)`}
+                          title={t('settings.mobileTitle', { control: label })}
                         >
                           <Icon size={16} strokeWidth={1.5} />
                         </button>
@@ -924,13 +1005,13 @@ export default function SettingsModal({
                 </div>
 
                 <div className="settings-section">
-                  <div className="settings-section-label">Home View</div>
+                  <div className="settings-section-label">{t('settings.homeView')}</div>
                   <div className="settings-actions">
                     <button
                       className="settings-action-btn"
                       onClick={() => { onChangeHomeView(); onClose(); }}
                     >
-                      Change Home View
+                      {t('settings.changeHomeView')}
                     </button>
                     {(getSetting('controls').homeView || homeViewReset === 'done') && (
                       <button
@@ -943,7 +1024,7 @@ export default function SettingsModal({
                           setTimeout(() => setHomeViewReset('idle'), 1500);
                         }}
                       >
-                        {homeViewReset === 'done' ? '\u2713 Reset' : 'Reset'}
+                        {homeViewReset === 'done' ? `\u2713 ${t('common.reset')}` : t('common.reset')}
                       </button>
                     )}
                   </div>
@@ -955,7 +1036,7 @@ export default function SettingsModal({
             {(section === 'infos' || (animating && prevSection === 'infos')) && (
               <div className="settings-page">
                 <div className="settings-section">
-                  <div className="settings-section-label">Repository</div>
+                  <div className="settings-section-label">{t('settings.repository')}</div>
                   <a
                     className="settings-action-btn settings-repo-link"
                     href="https://github.com/Kdcius/3Dash_webapp"
@@ -968,7 +1049,7 @@ export default function SettingsModal({
                 </div>
 
                 <div className="settings-section">
-                  <div className="settings-section-label">License</div>
+                  <div className="settings-section-label">{t('settings.license')}</div>
                   <div className="settings-infos-license">
                     <Scale size={16} strokeWidth={1.5} />
                     <span>Apache-2.0</span>
@@ -979,7 +1060,7 @@ export default function SettingsModal({
 
                 <div className="settings-infos-footer">
                   <HeartHandshake size={16} strokeWidth={1.5} />
-                  <span>Built with love in Montpellier</span>
+                  <span>{t('settings.builtWithLove')}</span>
                 </div>
               </div>
             )}
@@ -987,16 +1068,62 @@ export default function SettingsModal({
             {(section === 'system' || (animating && prevSection === 'system')) && (
               <div className="settings-page">
                 <div className="settings-section">
-                  <div className="settings-section-label">Backup</div>
+                  <div className="settings-section-label">{t('settings.model3d')}</div>
+                  <div className="settings-ha-fields">
+                    <div className="settings-ha-row">
+                      <div className="settings-ha-field" style={{ flex: 1 }}>
+                        <label className="settings-ha-label">{t('settings.scale')}</label>
+                        <input
+                          className="settings-ha-input"
+                          type="number"
+                          min={MODEL_SCALE_MIN}
+                          max={MODEL_SCALE_MAX}
+                          step="0.001"
+                          value={modelScaleValue}
+                          onChange={(e) => setModelScaleValue(e.target.value)}
+                        />
+                      </div>
+                      <button
+                        className={`settings-action-btn${modelScaleStatus === 'success' ? ' ha-ok' : modelScaleStatus === 'error' ? ' ha-err' : ''}`}
+                        style={{ alignSelf: 'end' }}
+                        onClick={handleApplyModelScale}
+                      >
+                        {modelScaleStatus === 'success' ? `\u2713 ${t('settings.applied')}` : modelScaleStatus === 'error' ? `\u2717 ${t('common.failed')}` : t('settings.apply')}
+                      </button>
+                    </div>
+                    <div className="settings-actions">
+                      <button
+                        className={`settings-action-btn${modelReplaceStatus === 'success' ? ' ha-ok' : modelReplaceStatus === 'error' ? ' ha-err' : ''}`}
+                        onClick={() => modelInputRef.current?.click()}
+                      >
+                        {modelReplaceStatus === 'success' ? `\u2713 ${t('settings.replaced')}` : modelReplaceStatus === 'error' ? `\u2717 ${t('common.failed')}` : t('settings.replaceGlb')}
+                      </button>
+                      <input
+                        ref={modelInputRef}
+                        type="file"
+                        accept=".glb"
+                        style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden', opacity: 0 }}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) await handleReplaceModel(file);
+                          e.target.value = '';
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="settings-section">
+                  <div className="settings-section-label">{t('settings.backup')}</div>
                   <div className="settings-actions">
                     <button className="settings-action-btn" onClick={exportBackup}>
-                      Export
+                      {t('settings.export')}
                     </button>
                     <button
                       className={`settings-action-btn${importStatus === 'success' ? ' ha-ok' : importStatus === 'error' ? ' ha-err' : ''}`}
                       onClick={() => importInputRef.current?.click()}
                     >
-                      {importStatus === 'success' ? '\u2713 Imported' : importStatus === 'error' ? '\u2717 Failed' : 'Import'}
+                      {importStatus === 'success' ? `\u2713 ${t('common.imported')}` : importStatus === 'error' ? `\u2717 ${t('common.failed')}` : t('common.import')}
                     </button>
                     <input
                       ref={importInputRef}
@@ -1021,20 +1148,20 @@ export default function SettingsModal({
                 </div>
 
                 <div className="settings-section">
-                  <div className="settings-section-label">DEBUG</div>
+                  <div className="settings-section-label">{t('settings.debug')}</div>
                   <div className="settings-actions">
                     <button className="settings-action-btn" onClick={() => { onDebugToggle(); onClose(); }}>
-                      Render
+                      {t('settings.renderDebug')}
                     </button>
                   </div>
                 </div>
 
                 <div className="settings-section">
-                  <div className="settings-section-label">Reset</div>
+                  <div className="settings-section-label">{t('common.reset')}</div>
                   <div className="settings-actions">
                     {confirmReset ? (
                       <>
-                        <span style={{ fontSize: 10, color: 'var(--red)', alignSelf: 'center' }}>Erase all config?</span>
+                        <span style={{ fontSize: 10, color: 'var(--red)', alignSelf: 'center' }}>{t('settings.eraseAllConfig')}</span>
                         <button
                           className="settings-action-btn"
                           style={{ borderColor: 'var(--red)', color: 'var(--red)' }}
@@ -1045,10 +1172,10 @@ export default function SettingsModal({
                             navigate('/onboarding');
                           }}
                         >
-                          Confirm
+                          {t('common.confirm')}
                         </button>
                         <button className="settings-action-btn" onClick={() => setConfirmReset(false)}>
-                          Cancel
+                          {t('common.cancel')}
                         </button>
                       </>
                     ) : (
@@ -1057,7 +1184,7 @@ export default function SettingsModal({
                         style={{ borderColor: 'var(--red)', color: 'var(--red)' }}
                         onClick={() => setConfirmReset(true)}
                       >
-                        Reset &amp; Restart Onboarding
+                        {t('settings.resetRestartOnboarding')}
                       </button>
                     )}
                   </div>
@@ -1067,15 +1194,15 @@ export default function SettingsModal({
 
                 <div className="settings-status">
                   <div className="settings-status-chip">
-                    Lights on <span>{lightsOnCount}</span>
+                    {t('settings.lightsOn')} <span>{lightsOnCount}</span>
                   </div>
                   <div className="settings-status-chip">
-                    HA <span style={{ color: demoMode ? 'var(--orange)' : haStatusColor }}>
-                      {demoMode ? 'demo' : haStatusText}
+                    {t('settings.ha')} <span style={{ color: demoMode ? 'var(--orange)' : haStatusColor }}>
+                      {demoMode ? t('settings.demo').toLowerCase() : haStatusText}
                     </span>
                   </div>
                   <div className="settings-status-chip">
-                    Model <span style={{ color: modelStatusColor }}>{modelStatus}</span>
+                    {t('settings.model')} <span style={{ color: modelStatusColor }}>{modelStatus}</span>
                   </div>
                 </div>
               </div>

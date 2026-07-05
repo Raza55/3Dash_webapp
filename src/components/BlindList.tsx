@@ -1,39 +1,39 @@
-import type { DisplayConfig } from '../types';
+import type { BlindConfig } from '../types';
 import { useTranslation } from '../contexts/LanguageContext';
 
 interface Props {
-  displays: DisplayConfig[];
+  blinds: BlindConfig[];
   selectedIdx: number | null;
   onSelect: (idx: number) => void;
   onDelete: (idx: number) => void;
   onDuplicate: (idx: number) => void;
 }
 
-export default function DisplayList({ displays, selectedIdx, onSelect, onDelete, onDuplicate }: Props) {
+export default function BlindList({ blinds, selectedIdx, onSelect, onDelete, onDuplicate }: Props) {
   const t = useTranslation();
 
-  if (displays.length === 0) {
+  if (blinds.length === 0) {
     return (
       <div className="list-empty">
-        {t('list.noDisplays')}<br />
-        <span dangerouslySetInnerHTML={{ __html: t('list.clickAddDisplay') }} />
+        {t('list.noBlinds')}<br />
+        <span dangerouslySetInnerHTML={{ __html: t('list.clickAddBlind') }} />
       </div>
     );
   }
 
   return (
     <>
-      {displays.map((d, i) => (
+      {blinds.map((blind, i) => (
         <div
-          key={d.id}
+          key={blind.id}
           className={`light-item${selectedIdx === i ? ' selected' : ''}`}
           onClick={() => onSelect(i)}
         >
-          <div className="light-item-icon">{d.kind === 'tv' ? '\u{1F4FA}' : '\u{1F4CA}'}</div>
+          <div className="light-item-icon">&#9646;</div>
           <div className="light-item-info">
-            <div className="light-item-name">{d.label || d.id}</div>
+            <div className="light-item-name">{blind.label || blind.entityId}</div>
             <div className="light-item-meta">
-              {d.kind === 'tv' ? t('form.tvDisplay') : d.sources.map((s) => s.entityId).join(', ') || t('list.noSources')}
+              {blind.entityId} &middot; {blind.size.width.toFixed(1)} x {blind.size.height.toFixed(1)} &middot; {blind.slats ?? 10} {t('list.slats')}
             </div>
           </div>
           <button

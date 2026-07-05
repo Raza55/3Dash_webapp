@@ -12,6 +12,7 @@ export interface LightPosition {
 }
 
 export type LightType = 'toggle' | 'dimmeable' | 'warmCold' | 'rgb' | 'rgbw' | 'remote';
+export type LightShape = 'sphere' | 'cube' | 'ellipsoid';
 
 export interface RemoteButton {
   entityId: string;
@@ -23,25 +24,37 @@ export interface RemoteButton {
 }
 
 export interface LightPart {
-  shape: 'sphere' | 'cube';
+  shape: LightShape;
   size: LightSize;
   position: LightPosition;
+  /** Visual rotation in degrees. */
+  rotation?: LightPosition;
+  /** Visual scale multiplier after size has been applied. */
+  scale?: LightPosition;
 }
 
 export interface HitboxConfig {
-  shape: 'sphere' | 'cube';
+  shape: LightShape;
   size: LightSize;
   /** Hitbox position. If undefined, defaults to the light's position. */
   position?: LightPosition;
+  /** Hitbox rotation in degrees. */
+  rotation?: LightPosition;
+  /** Hitbox scale multiplier after size has been applied. */
+  scale?: LightPosition;
 }
 
 export interface LightConfig {
   entityId: string;
   label: string;
   type: LightType;
-  shape?: 'sphere' | 'cube';
+  shape?: LightShape;
   size?: LightSize;
   position: LightPosition;
+  /** Visual rotation in degrees. */
+  rotation?: LightPosition;
+  /** Visual scale multiplier after size has been applied. */
+  scale?: LightPosition;
   /** Base color temperature in Kelvin (2000-6500). Used as default color for toggle/dimmeable lights. */
   warmth?: number;
   /** Intensity multiplier for the 3D point light (0.1–1000, default 1). Applies to all light types. */
@@ -65,6 +78,50 @@ export interface LightGroup {
   name: string;
 }
 
+// --- 3D model ---
+
+export interface ModelObjectTransform {
+  position?: LightPosition;
+  /** Rotation in degrees. */
+  rotation?: LightPosition;
+  scale?: LightPosition;
+}
+
+export interface ModelObjectOverride extends ModelObjectTransform {
+  id: string;
+  label?: string;
+}
+
+export interface ImportedModelObjectConfig extends ModelObjectTransform {
+  id: string;
+  label: string;
+  fileName: string;
+  format: string;
+}
+
+export interface ModelConfig {
+  /** User scale applied on top of the loader's automatic unit conversion. */
+  scale?: number;
+  /** Local transform overrides for imported model sub-objects. */
+  objectOverrides?: ModelObjectOverride[];
+  /** Additional user-uploaded 3D objects placed inside the model scene. */
+  importedObjects?: ImportedModelObjectConfig[];
+}
+
+// --- Blinds / covers ---
+
+export interface BlindConfig {
+  id: string;
+  entityId: string;
+  label: string;
+  position: LightPosition;
+  size: { width: number; height: number; depth: number };
+  /** Rotation around the vertical axis in degrees. */
+  rotationY?: number;
+  /** Number of horizontal slats/segments to render inside the blind. */
+  slats?: number;
+}
+
 // --- Shadow Walls (invisible roof / sun blockers) ---
 
 export interface ShadowWallConfig {
@@ -72,6 +129,8 @@ export interface ShadowWallConfig {
   label: string;
   position: LightPosition;
   size: { width: number; height: number; depth: number };
+  /** Optional visual/shadow rotation in degrees. */
+  rotation?: LightPosition;
 }
 
 // --- Wall Displays ---
@@ -110,9 +169,13 @@ export interface DisplaySource {
 
 export type TextAlign = 'left' | 'center' | 'right';
 
+export type DisplayKind = 'info' | 'tv';
+
 export interface DisplayConfig {
   id: string;
   label: string;
+  /** Info displays show sensor values; TV displays control a media_player entity. */
+  kind?: DisplayKind;
   sources: DisplaySource[];
   position: LightPosition;
   /** Wall face normal (unit vector) — display faces outward along this direction. */
@@ -150,6 +213,8 @@ export interface AppConfig {
     northOffset?: number;
   };
   lights: LightConfig[];
+  model?: ModelConfig;
+  blinds?: BlindConfig[];
   lightGroups?: LightGroup[];
   displays?: DisplayConfig[];
   shadowWalls?: ShadowWallConfig[];
@@ -171,6 +236,8 @@ export interface FullConfig {
     northOffset?: number;
   };
   lights: LightConfig[];
+  model?: ModelConfig;
+  blinds?: BlindConfig[];
   lightGroups?: LightGroup[];
   displays?: DisplayConfig[];
   shadowWalls?: ShadowWallConfig[];

@@ -4,6 +4,7 @@ import { Sun, Moon, Github } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useDemoMode } from '../../contexts/DemoModeContext';
 import { useSimulationMode } from '../../contexts/SimulationModeContext';
+import { useTranslation } from '../../contexts/LanguageContext';
 import { getConfig, updateConfig, importBackup, getModelBlob } from '../../services/configApi';
 import { getSettings, getSetting } from '../../services/settingsStore';
 import WelcomeStep from './steps/WelcomeStep';
@@ -65,6 +66,7 @@ export default function Onboarding() {
   const { theme, resolved, setTheme } = useTheme();
   const { setDemoMode } = useDemoMode();
   const { setSimulationMode } = useSimulationMode();
+  const t = useTranslation();
   const navigate = useNavigate();
 
   const [currentStep, setCurrentStep] = useState(0);
@@ -124,7 +126,7 @@ export default function Onboarding() {
           haStatus = 'success';
         } else {
           haStatus = 'error';
-          haError = test.error || 'Connection failed';
+          haError = test.error || t('onboarding.connectionFailed');
           setImportedHA({ ...ha, error: haError });
         }
       } else {
@@ -158,7 +160,7 @@ export default function Onboarding() {
     } catch {
       // TODO: surface error to user
     }
-  }, [goTo]);
+  }, [goTo, t]);
 
   const handleImportReportContinue = useCallback(() => {
     if (importReport?.haStatus === 'success') {
@@ -210,7 +212,7 @@ export default function Onboarding() {
       <button
         className="onboarding-theme-toggle"
         onClick={() => setTheme(resolved === 'dark' ? 'light' : 'dark')}
-        title={`Switch to ${resolved === 'dark' ? 'light' : 'dark'} theme`}
+        title={t('settings.switchTheme', { theme: resolved === 'dark' ? t('settings.light') : t('settings.dark') })}
       >
         {resolved === 'dark'
           ? <Sun key="sun" size={28} strokeWidth={1.5} />
@@ -271,7 +273,7 @@ export default function Onboarding() {
               className="onboarding-btn"
               onClick={() => goTo(pathSteps[dotIndex - 1])}
             >
-              Back
+              {t('onboarding.back')}
             </button>
           )}
         </div>
@@ -295,7 +297,7 @@ export default function Onboarding() {
         href="https://github.com/Kdcius/3Dash_webapp"
         target="_blank"
         rel="noopener noreferrer"
-        title="View on GitHub"
+        title={t('onboarding.githubTitle')}
       >
         <Github size={28} strokeWidth={1.5} />
       </a>
