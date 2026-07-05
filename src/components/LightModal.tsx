@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import ColorWheel, { hslToRgb } from './ColorWheel';
 import { miredToKelvin } from '../utils/color';
-import type { LightType, HAState, LightSceneOption } from '../types';
+import type { HAState, LightSceneOption } from '../types';
 import { useTranslation } from '../contexts/LanguageContext';
 import './LightModal.css';
 
@@ -9,7 +9,6 @@ interface Props {
   visible: boolean;
   entityId: string | null;
   label: string;
-  lightType: LightType;
   state: HAState | null;
   onClose: () => void;
   onToggle: (entityId: string) => void;
@@ -26,6 +25,8 @@ interface Props {
 
 const DEFAULT_MIN_KELVIN = 2000;
 const DEFAULT_MAX_KELVIN = 6500;
+const COLOR_MODES = new Set(['hs', 'rgb', 'rgbw', 'rgbww', 'xy']);
+const WHITE_CHANNEL_MODES = new Set(['white', 'rgbw', 'rgbww']);
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -55,14 +56,58 @@ function rgbToHueSat([r, g, b]: [number, number, number]): { h: number; s: numbe
 
 function supportedModes(state: HAState | null): string[] {
   const modes = state?.attributes.supported_color_modes;
-  return Array.isArray(modes) ? modes.filter((m): m is string => typeof m === 'string') : [];
+  return Array.isArray(modes)
+    ? modes.filter((m): m is string => typeof m === 'string').map((m) => m.toLowerCase())
+    : [];
+}
+
+function modeSet(modes: string[]): Set<string> {
+  return new Set(modes);
+}
+
+function hasAnyMode(modes: Set<string>, candidates: Set<string>): boolean {
+  for (const candidate of candidates) {
+    if (modes.has(candidate)) return true;
+  }
+  return false;
+}
+
+function supportsBrightnessFromModes(modes: string[]): boolean {
+  // Home Assistant color modes except onoff/unknown imply a controllable level.
+  return modes.some((mode) => mode !== 'onoff' && mode !== 'unknown');
+}
+
+function deriveLightSupport(state: HAState | null, modes: string[], effectCount: number) {
+  const modesByName = modeSet(modes);
+  if (modes.length > 0) {
+    return {
+      brightness: supportsBrightnessFromModes(modes),
+      colorTemp: modesByName.has('color_temp'),
+      color: hasAnyMode(modesByName, COLOR_MODES),
+      whiteChannel: hasAnyMode(modesByName, WHITE_CHANNEL_MODES),
+      effects: effectCount > 0,
+    };
+  }
+
+  const attrs = state?.attributes;
+  const colorMode = typeof attrs?.color_mode === 'string' ? attrs.color_mode.toLowerCase() : '';
+  const hasState = !!state && state.state !== 'unavailable' && state.state !== 'unknown';
+
+  // Fallback for older/limited integrations that do not expose supported_color_modes:
+  // only show controls that are evidenced by actual HA attributes.
+  return {
+    brightness: hasState && typeof attrs?.brightness === 'number',
+    colorTemp: !!(attrs?.color_temp || attrs?.color_temp_kelvin || colorMode === 'color_temp'),
+    color: !!(attrs?.rgb_color || attrs?.hs_color || attrs?.xy_color || COLOR_MODES.has(colorMode)),
+    whiteChannel: typeof attrs?.white_value === 'number' || WHITE_CHANNEL_MODES.has(colorMode),
+    effects: effectCount > 0,
+  };
 }
 
 export default function LightModal({
   visible,
   entityId,
   label,
-  lightType,
   state,
   onClose,
   onToggle,
@@ -211,11 +256,12 @@ export default function LightModal({
     [onActivateScene],
   );
 
-  const showBrightness = ['dimmeable', 'warmCold', 'rgb', 'rgbw'].includes(lightType) || modes.some((m) => m !== 'onoff');
-  const showTemp = lightType === 'warmCold' || modes.includes('color_temp') || state?.attributes.color_temp !== undefined || state?.attributes.color_temp_kelvin !== undefined;
-  const showColor = lightType === 'rgb' || lightType === 'rgbw' || modes.some((m) => ['hs', 'rgb', 'rgbw', 'rgbww', 'xy'].includes(m));
-  const showWhite = lightType === 'rgbw' || modes.some((m) => ['white', 'rgbw', 'rgbww'].includes(m));
-  const showEffects = effectList.length > 0;
+  const support = deriveLightSupport(state, modes, effectList.length);
+  const showBrightness = support.brightness;
+  const showTemp = support.colorTemp;
+  const showColor = support.color;
+  const showWhite = support.whiteChannel;
+  const showEffects = support.effects;
 
   return (
     <div

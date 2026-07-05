@@ -137,7 +137,6 @@ export default function Dashboard() {
   const [modalVisible, setModalVisible] = useState(false);
   const [modalEntityId, setModalEntityId] = useState<string | null>(null);
   const [modalLabel, setModalLabel] = useState('');
-  const [modalLightType, setModalLightType] = useState<LightConfig['type']>('toggle');
   const [modalState, setModalState] = useState<HAState | null>(null);
   const [modalDoubleTapEntityId, setModalDoubleTapEntityId] = useState<string | undefined>();
   const [modalDoubleTapState, setModalDoubleTapState] = useState<HAState | null>(null);
@@ -1368,7 +1367,6 @@ export default function Dashboard() {
 
     setModalEntityId(entityId);
     setModalLabel(lbl);
-    setModalLightType(cfg.type || 'toggle');
     setModalState(lastStatesRef.current[entityId] || null);
     setModalDoubleTapEntityId(cfg.doubleTapEntityId);
     setModalDoubleTapState(cfg.doubleTapEntityId ? lastStatesRef.current[cfg.doubleTapEntityId] || null : null);
@@ -1978,7 +1976,6 @@ export default function Dashboard() {
           visible={modalVisible}
           entityId={modalEntityId}
           label={modalLabel}
-          lightType={modalLightType}
           state={modalState}
           onClose={handleModalClose}
           onToggle={handleToggle}
