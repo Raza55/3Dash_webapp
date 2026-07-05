@@ -145,35 +145,18 @@
   transition: all 0.15s;
 }
 
-.settings-list-item-direct {
-  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  color: var(--accent);
-}
-
-.settings-list-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 8px 0;
-}
-
 @media (hover: hover) and (pointer: fine) {
   .settings-list-item:hover {
     background: var(--surface);
     border-color: var(--border);
     color: var(--accent);
   }
-
-  .settings-list-item-direct:hover {
-    border-color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 14%, transparent);
-  }
 }
 
 /* Bottom action buttons */
 .settings-bottom-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 10px;
 }
 

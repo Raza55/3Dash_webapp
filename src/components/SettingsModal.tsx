@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   Server, Palette, Box, MonitorCloud, Hand, Cog, Info,
-  Lightbulb, LayoutTemplate, ChevronLeft, X,
+  LayoutTemplate, ChevronLeft, X,
   Monitor, Smartphone, Search, RotateCw, Move,
   Github, HeartHandshake, Scale,
 } from 'lucide-react';
@@ -424,14 +424,6 @@ export default function SettingsModal({
           >
             <div className="settings-main">
               <div className="settings-list">
-                <button
-                  className="settings-list-item settings-list-item-direct"
-                  onClick={() => { onClose(); navigate('/editor'); }}
-                >
-                  <Lightbulb size={18} strokeWidth={1.5} />
-                  <span>{t('settings.openEditor')}</span>
-                </button>
-                <div className="settings-list-divider" />
                 {SECTIONS.map(({ key, labelKey, icon: Icon }) => (
                   <button
                     key={key}
@@ -445,14 +437,6 @@ export default function SettingsModal({
               </div>
 
               <div className="settings-bottom-actions">
-                <Link
-                  to="/editor"
-                  className="settings-big-btn"
-                  onClick={onClose}
-                >
-                  <Lightbulb size={20} strokeWidth={1.5} />
-                  <span>{t('settings.editLights')}</span>
-                </Link>
                 <button
                   className="settings-big-btn"
                   onClick={() => { onEditGrid(); onClose(); }}
