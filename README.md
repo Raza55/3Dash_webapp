@@ -4,18 +4,26 @@ A 3D floorplan dashboard for [Home Assistant](https://www.home-assistant.io/). L
 
 ## Features
 
-- **3D floorplan** -- load a custom `.glb` model of your home and navigate it freely
-- **Light control** -- toggle, dim, and color-pick lights directly from the 3D scene (supports on/off, dimmable, RGB, RGBW, and IR remote types)
-- **Wall displays** -- render live sensor data (temperature, humidity, energy, etc.) on surfaces inside the model
+- **3D floorplan** -- load a custom `.glb` model, adjust model scale, import extra 3D objects, and navigate freely
+- **Light control** -- toggle, dim, color-pick, rotate, and scale lights directly from the 3D scene (supports on/off, dimmable, RGB, RGBW, and IR remote types)
+- **Blinds / covers** -- place slatted blinds in the model and link them to Home Assistant cover entities
+- **Wall displays and TV mode** -- render sensor data or connect media players with on/off screen states
 - **Network tubes** -- animated tubes that visualize real-time network throughput
 - **Sun and weather** -- sun position tracks your real location; optional rain/snow particle effects
 - **Side panel** -- configurable cards for scripts, indicators, and graphs
-- **Config editor** -- define lights, displays, shadow walls, and tubes from a built-in UI
+- **Config editor** -- define lights, blinds, displays, shadow walls, tubes, imported objects, and model-object overrides from a built-in UI
 - **Onboarding wizard** -- guided setup for first-time users
 - **Backup / restore** -- export and import your full configuration as a ZIP
 - **Demo mode** -- explore the dashboard without a Home Assistant instance
 - **PWA** -- installable as a progressive web app with offline support
 - **Dark and light themes**
+
+## Recent fork additions
+
+- Runtime 3D model tools: replace/import models, adjust shared model scale, toggle textures, and keep scene objects aligned.
+- Model-object editor: select imported subobjects or uploaded objects and fine-tune position, rotation, and scale with shared gizmo modes.
+- Smart-home object expansion: blinds/covers, TV-style media-player displays, ellipsoid lights, and rotation/scale editing for placed items.
+- Editor polish: lower camera sensitivity, smoother zoom, German/English UI text, and more complete backup/restore coverage.
 
 ## Tech stack
 
@@ -67,7 +75,8 @@ All configuration happens in the browser -- no config files to edit manually.
 | Home Assistant URL, port, and token | Onboarding wizard or Settings |
 | Location (for sun tracking) | Onboarding wizard or Settings |
 | Theme, rendering, camera | Settings modal |
-| Lights, displays, shadow walls, tubes | Config editor |
+| 3D model, scale, textures, and object overrides | Settings and Config editor |
+| Lights, blinds, displays, shadow walls, tubes, imported objects | Config editor |
 
 Configuration is persisted in `localStorage`. The 3D model is stored in `IndexedDB`.
 
@@ -75,11 +84,11 @@ Configuration is persisted in `localStorage`. The 3D model is stored in `Indexed
 
 ```
 src/
-  babylon/       3D scene, model loading, lights, displays, tubes, sun, weather
+  babylon/       3D scene, model loading, lights, blinds, displays, tubes, sun, weather
   components/    React UI (HUD, modals, side panel, cards, forms, guided tour)
   pages/         Dashboard, config editor, onboarding
   services/      HA WebSocket client, config/settings persistence, storage
-  contexts/      React contexts (demo mode, camera, theme)
+  contexts/      React contexts (demo mode, camera, language, theme)
   types/         TypeScript type definitions
   utils/         Color conversion helpers
 public/          Static assets (default 3D model, fonts, icons, PWA manifests)

@@ -28,7 +28,15 @@ All configuration happens in the browser -- no files to edit manually.
 | Home Assistant connection | Onboarding wizard or Settings |
 | Location (for sun tracking) | Onboarding wizard or Settings |
 | Theme, rendering, camera | Settings modal |
-| Lights, displays, shadow walls, tubes | Config editor |
+| 3D model replacement, model scale, and texture toggle | Settings and Config editor |
+| Lights, blinds/covers, displays, TV mode, shadow walls, tubes, imported objects | Config editor |
+
+## Added editor features
+
+- Use the editor transform mode to switch between moving, rotating, and scaling selected objects.
+- Add blinds/covers as slatted rectangular surfaces and connect them to Home Assistant cover entities.
+- Use TV mode on displays to connect a `media_player` entity and show on/off screen states.
+- Import additional 3D objects and fine-tune model subobjects without rewriting the original model file.
 
 ## SSL / HTTPS
 
@@ -36,7 +44,7 @@ When running behind HTTPS, the add-on automatically uses `wss://` for the WebSoc
 
 ## Backup and restore
 
-You can export your full configuration (lights, displays, settings, and 3D model) as a ZIP file from the settings panel. Use this to back up your setup or transfer it to another instance.
+You can export your full configuration (settings, 3D model, lights, blinds, displays, tubes, and model-object overrides) as a ZIP file from the settings panel. Use this to back up your setup or transfer it to another instance.
 
 ## Support
 

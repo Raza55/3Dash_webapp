@@ -16,12 +16,13 @@ Your browser may show a certificate warning on first visit -- this is normal (se
 
 ## Features
 
-- 3D floorplan with custom `.glb` models
-- Light control (on/off, dimmable, RGB, RGBW, IR remote)
-- Wall displays with live sensor data
+- 3D floorplan with custom `.glb` models, runtime scale controls, and imported 3D objects
+- Light control (on/off, dimmable, RGB, RGBW, IR remote) with editable shape, rotation, and scale
+- Blinds/covers linked to Home Assistant cover entities
+- Wall displays with live sensor data and TV-style media-player mode
 - Animated network throughput tubes
 - Real-time sun positioning and weather effects
 - Configurable side panel with scripts, indicators, and graphs
-- Built-in config editor and onboarding wizard
+- Built-in config editor, model-object editor, and onboarding wizard
 - Backup and restore
 - Dark and light themes
