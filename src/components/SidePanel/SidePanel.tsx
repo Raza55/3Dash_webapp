@@ -1,4 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { PencilRuler, Settings } from 'lucide-react';
 import type { SidePanelConfig, SidePanelCard, HAState, CardLayout } from '../../types';
 import type { HALike } from '../../services/haWebSocket';
 import { useTranslation } from '../../contexts/LanguageContext';
@@ -29,6 +31,7 @@ const PANEL_PADDING = 24; // 12px each side
 
 export default function SidePanel({ config, ha, cardStates, onSettingsOpen, panelSize, onPanelResize, editMode, onEditDone, onLayoutChange, onSetTemperature, onSetHvacMode, onCardEdit, onCardDelete, onCardAdd, onExitSimulation }: Props) {
   const t = useTranslation();
+  const navigate = useNavigate();
   const innerRef = useRef<HTMLDivElement>(null);
   const gridWidth = panelSize - PANEL_PADDING;
   const [gridHeight, setGridHeight] = useState(200);
@@ -104,6 +107,17 @@ export default function SidePanel({ config, ha, cardStates, onSettingsOpen, pane
     <div className="side-panel" style={{ width: `${panelSize}px` }}>
       <div className="side-panel-inner" ref={innerRef}>
         <div className="side-panel-content">
+          {!editMode && (
+            <div className="side-panel-top-actions">
+              <button
+                className="side-panel-editor-btn"
+                onClick={() => navigate('/editor')}
+              >
+                <PencilRuler size={14} strokeWidth={1.8} />
+                <span>{t('settings.openEditor')}</span>
+              </button>
+            </div>
+          )}
           {config && config.cards.length > 0 && (
             <CardGrid
               config={config}
@@ -132,7 +146,8 @@ export default function SidePanel({ config, ha, cardStates, onSettingsOpen, pane
             <>
               {onSettingsOpen && (
                 <button className="side-panel-settings-btn" onClick={onSettingsOpen}>
-                  &#9881; {t('cards.settings')}
+                  <Settings size={13} strokeWidth={1.8} />
+                  <span>{t('cards.settings')}</span>
                 </button>
               )}
               {onExitSimulation && (
