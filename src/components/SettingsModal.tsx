@@ -424,6 +424,14 @@ export default function SettingsModal({
           >
             <div className="settings-main">
               <div className="settings-list">
+                <button
+                  className="settings-list-item settings-list-item-direct"
+                  onClick={() => { onClose(); navigate('/editor'); }}
+                >
+                  <Lightbulb size={18} strokeWidth={1.5} />
+                  <span>{t('settings.openEditor')}</span>
+                </button>
+                <div className="settings-list-divider" />
                 {SECTIONS.map(({ key, labelKey, icon: Icon }) => (
                   <button
                     key={key}
