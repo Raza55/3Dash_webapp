@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import type { DisplayAnimation, DisplayCondition, DisplayConfig, DisplayKind, DisplaySource, LightPosition, TextAlign } from '../types';
 import { generateUUID } from '../utils/uuid';
+import { fineSliderRange } from '../utils/editorControls';
 import LucideIcon from './SidePanel/cards/LucideIcon';
 import { FormPanel, AccordionSection } from './FormPanel';
 import EntityPicker, { type HAEntityOption } from './EntityPicker';
@@ -65,6 +66,7 @@ interface Props {
   position: LightPosition;
   normal: LightPosition;
   onPositionChange: (pos: LightPosition) => void;
+  onNormalChange: (normal: LightPosition) => void;
   onSave: (config: DisplayConfig) => void;
   onClose: () => void;
   onEnterPlacingMode: () => void;
@@ -72,6 +74,7 @@ interface Props {
   onPreviewChange: (info: DisplayPreviewInfo) => void;
   placingMode: boolean;
   haEntities?: HAEntityOption[];
+  defaultSize?: { width: number; height: number };
 }
 
 const DEFAULT_SOURCE: DisplaySource = {
@@ -134,6 +137,7 @@ const DisplayForm = forwardRef<DisplayFormHandle, Props>(function DisplayForm({
   position,
   normal,
   onPositionChange,
+  onNormalChange,
   onSave,
   onClose,
   onEnterPlacingMode,
@@ -141,6 +145,7 @@ const DisplayForm = forwardRef<DisplayFormHandle, Props>(function DisplayForm({
   onPreviewChange,
   placingMode,
   haEntities = [],
+  defaultSize = { width: 0.5, height: 0.28 },
 }: Props, ref) {
   const t = useTranslation();
   const [displayKind, setDisplayKind] = useState<DisplayKind>('info');
@@ -187,8 +192,8 @@ const DisplayForm = forwardRef<DisplayFormHandle, Props>(function DisplayForm({
       setBgEnabled(bg !== 'transparent');
       setClickable(editDisplay.clickable ?? false);
       setAnimation(editDisplay.animation);
-      setWidth(editDisplay.width ?? 0);
-      setHeight(editDisplay.height ?? 0);
+      setWidth(editDisplay.width || defaultSize.width);
+      setHeight(editDisplay.height || defaultSize.height);
     } else {
       setDisplayKind('info');
       setLabel('');
@@ -201,10 +206,10 @@ const DisplayForm = forwardRef<DisplayFormHandle, Props>(function DisplayForm({
       setBgEnabled(false);
       setClickable(false);
       setAnimation(undefined);
-      setWidth(0);
-      setHeight(0);
+      setWidth(defaultSize.width);
+      setHeight(defaultSize.height);
     }
-  }, [editDisplay]);
+  }, [editDisplay, open, defaultSize.width, defaultSize.height]);
 
   // Fire preview on every change
   useEffect(() => {
@@ -274,6 +279,23 @@ const DisplayForm = forwardRef<DisplayFormHandle, Props>(function DisplayForm({
       onPositionChange({ ...position, [axis]: value });
     },
     [position, onPositionChange],
+  );
+
+  const handleNormalChange = useCallback(
+    (axis: keyof LightPosition, value: number) => {
+      const next = { ...normal, [axis]: value };
+      const length = Math.hypot(next.x, next.y, next.z);
+      if (length < 0.001) {
+        onNormalChange({ x: 0, y: 0, z: 1 });
+        return;
+      }
+      onNormalChange({
+        x: parseFloat((next.x / length).toFixed(4)),
+        y: parseFloat((next.y / length).toFixed(4)),
+        z: parseFloat((next.z / length).toFixed(4)),
+      });
+    },
+    [normal, onNormalChange],
   );
 
   const footer = (
@@ -576,6 +598,67 @@ const DisplayForm = forwardRef<DisplayFormHandle, Props>(function DisplayForm({
         )}
       </AccordionSection>
 
+      <AccordionSection title={t('form.size')} defaultOpen>
+        {([
+          { label: t('form.width'), key: 'width' as const, value: width, set: setWidth, span: 0.45 },
+          { label: t('form.height'), key: 'height' as const, value: height, set: setHeight, span: 0.3 },
+        ]).map(({ label: lbl, key, value, set, span }) => {
+          const range = fineSliderRange(value, span, 0.05, 8);
+          return (
+            <div key={key} className="pos-grid">
+              <span className="pos-axis" style={{ color: 'var(--muted)' }}>{lbl}</span>
+              <input
+                type="range"
+                className="pos-slider"
+                min={range.min}
+                max={range.max}
+                step={0.01}
+                value={value}
+                onChange={(e) => set(parseFloat(e.target.value))}
+              />
+              <input
+                type="number"
+                className="pos-num"
+                step={0.01}
+                min={0.05}
+                value={value}
+                onChange={(e) => set(parseFloat(e.target.value) || 0.05)}
+              />
+            </div>
+          );
+        })}
+      </AccordionSection>
+
+      <AccordionSection title={t('form.orientation')}>
+        {([
+          { label: 'X', axis: 'x' as const, value: normal.x },
+          { label: 'Z', axis: 'y' as const, value: normal.y },
+          { label: 'Y', axis: 'z' as const, value: normal.z },
+        ]).map(({ label: lbl, axis, value }) => (
+          <div key={axis} className="pos-grid">
+            <span className="pos-axis" style={{ color: 'var(--muted)' }}>{lbl}</span>
+            <input
+              type="range"
+              className="pos-slider"
+              min={-1}
+              max={1}
+              step={0.01}
+              value={value}
+              onChange={(e) => handleNormalChange(axis, parseFloat(e.target.value))}
+            />
+            <input
+              type="number"
+              className="pos-num"
+              step={0.01}
+              min={-1}
+              max={1}
+              value={value}
+              onChange={(e) => handleNormalChange(axis, parseFloat(e.target.value) || 0)}
+            />
+          </div>
+        ))}
+      </AccordionSection>
+
       <AccordionSection title={t('form.displaySettings')}>
         {displayKind === 'info' && (
           <div className="field-group">
@@ -666,30 +749,33 @@ const DisplayForm = forwardRef<DisplayFormHandle, Props>(function DisplayForm({
         />
 
         {([
-          { label: 'X', color: '#f87171', babylonAxis: 'x' as const, range: [-30, 30] as [number, number] },
-          { label: 'Z', color: '#4ade80', babylonAxis: 'y' as const, range: [-2, 10] as [number, number] },
-          { label: 'Y', color: '#38bdf8', babylonAxis: 'z' as const, range: [-30, 30] as [number, number] },
-        ]).map(({ label: axLabel, color: axColor, babylonAxis, range }) => (
-          <div key={babylonAxis} className="pos-grid">
-            <span className="pos-axis" style={{ color: axColor }}>{axLabel}</span>
-            <input
-              type="range"
-              className="pos-slider"
-              min={range[0]}
-              max={range[1]}
-              step={0.05}
-              value={position[babylonAxis]}
-              onChange={(e) => handlePosChange(babylonAxis, parseFloat(e.target.value))}
-            />
-            <input
-              type="number"
-              className="pos-num"
-              step={0.05}
-              value={position[babylonAxis]}
-              onChange={(e) => handlePosChange(babylonAxis, parseFloat(e.target.value) || 0)}
-            />
-          </div>
-        ))}
+          { label: 'X', color: '#f87171', babylonAxis: 'x' as const, span: 2 },
+          { label: 'Z', color: '#4ade80', babylonAxis: 'y' as const, span: 0.8 },
+          { label: 'Y', color: '#38bdf8', babylonAxis: 'z' as const, span: 2 },
+        ]).map(({ label: axLabel, color: axColor, babylonAxis, span }) => {
+          const range = fineSliderRange(position[babylonAxis], span);
+          return (
+            <div key={babylonAxis} className="pos-grid">
+              <span className="pos-axis" style={{ color: axColor }}>{axLabel}</span>
+              <input
+                type="range"
+                className="pos-slider"
+                min={range.min}
+                max={range.max}
+                step={0.01}
+                value={position[babylonAxis]}
+                onChange={(e) => handlePosChange(babylonAxis, parseFloat(e.target.value))}
+              />
+              <input
+                type="number"
+                className="pos-num"
+                step={0.01}
+                value={position[babylonAxis]}
+                onChange={(e) => handlePosChange(babylonAxis, parseFloat(e.target.value) || 0)}
+              />
+            </div>
+          );
+        })}
 
         <div style={{ marginTop: 8 }}>
           <span className="field-label">{t('form.surfaceNormal')}</span>

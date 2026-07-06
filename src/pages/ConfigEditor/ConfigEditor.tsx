@@ -70,6 +70,7 @@ import TubeForm, { type TubePreviewInfo } from '../../components/TubeForm';
 import ModelObjectList, { type ModelObjectEditMode, type ModelObjectListItem } from '../../components/ModelObjectList';
 import { createTubeMeshes, removeTubeMeshes, disposeAllTubes, renderMockupLabels, type TubeMap } from '../../babylon/TubeMeshFactory';
 import { createSceneScaleRoot, getModelScale, worldToConfigPosition } from '../../babylon/SceneScale';
+import { sceneRelativeDefaults, type SceneRelativeDefaults } from '../../utils/editorControls';
 import { useTranslation } from '../../contexts/LanguageContext';
 import GuidedTour from '../../components/GuidedTour/GuidedTour';
 import { editorTourSteps } from '../../components/GuidedTour/tourSteps';
@@ -80,6 +81,7 @@ type ActiveGizmo = PositionGizmo | RotationGizmo | ScaleGizmo;
 type EditorTransformMode = ModelObjectEditMode;
 
 const TRANSFORM_MODES: EditorTransformMode[] = ['move', 'rotate', 'scale'];
+const DEFAULT_EDITOR_SIZES = sceneRelativeDefaults(10);
 const NANOLEAF_PANEL_COORDS: Array<[number, number]> = [
   [0, 0],
   [1, 0],
@@ -220,6 +222,7 @@ export default function ConfigEditor() {
   const homeTargetRef = useRef<Vector3 | null>(null);
   const modelSizeRef = useRef<{ x: number; z: number } | null>(null);
   const modelDiagonalRef = useRef(1);
+  const [editorDefaultSizes, setEditorDefaultSizes] = useState<SceneRelativeDefaults>(DEFAULT_EDITOR_SIZES);
   const modelMeshesRef = useRef<AbstractMesh[]>([]);
   const edgeOutlineRef = useRef<EdgeOutlineControls | null>(null);
   const meshMapRef = useRef<MeshMap>({});
@@ -317,7 +320,7 @@ export default function ConfigEditor() {
   blindPanelOpenRef.current = blindPanelOpen;
   const blindsRef = useRef(blinds);
   blindsRef.current = blinds;
-  const blindPreviewInfoRef = useRef<BlindPreviewInfo>({ size: { width: 1.2, height: 1.6, depth: 0.04 }, rotationY: 0, slats: 10 });
+  const blindPreviewInfoRef = useRef<BlindPreviewInfo>({ size: editorDefaultSizes.blind, rotationY: 0, slats: 10 });
   const blindPreviewIdRef = useRef<string | null>(null);
 
   // Shadow wall state
@@ -331,7 +334,7 @@ export default function ConfigEditor() {
   // Pink wireframe meshes shown in the editor when walls tab is active
   const wallEditorMeshesRef = useRef<Mesh[]>([]);
   const wallEditorMatRef = useRef<StandardMaterial | null>(null);
-  const wallPreviewInfoRef = useRef<WallPreviewInfo>({ size: { width: 5, height: 0.05, depth: 5 } });
+  const wallPreviewInfoRef = useRef<WallPreviewInfo>({ size: editorDefaultSizes.wall });
 
   // Tube state
   const tubeMeshMapRef = useRef<TubeMap>({});
@@ -345,7 +348,7 @@ export default function ConfigEditor() {
   const tubePreviewInfoRef = useRef<TubePreviewInfo | null>(null);
 
   // Current preview shape/size from LightForm
-  const previewInfoRef = useRef<PreviewInfo>({ shape: 'sphere', size: { diameter: 0.25 } });
+  const previewInfoRef = useRef<PreviewInfo>({ shape: 'sphere', size: { diameter: editorDefaultSizes.light.diameter } });
 
   // Refs for current values accessible in Babylon callbacks
   const lightsRef = useRef(lights);
@@ -358,6 +361,18 @@ export default function ConfigEditor() {
   panelOpenRef.current = panelOpen;
   const pendingGizmoPositionRef = useRef<LightPosition | null>(null);
   const gizmoPositionFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!panelOpenRef.current) {
+      previewInfoRef.current = { shape: 'sphere', size: { diameter: editorDefaultSizes.light.diameter } };
+    }
+    if (!blindPanelOpenRef.current) {
+      blindPreviewInfoRef.current = { size: editorDefaultSizes.blind, rotationY: 0, slats: 10 };
+    }
+    if (!wallPanelOpenRef.current) {
+      wallPreviewInfoRef.current = { size: editorDefaultSizes.wall };
+    }
+  }, [editorDefaultSizes]);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -1214,6 +1229,7 @@ export default function ConfigEditor() {
 
         modelSizeRef.current = { x: result.size.x, z: result.size.z };
         modelDiagonalRef.current = result.diagonal;
+        setEditorDefaultSizes(sceneRelativeDefaults(result.diagonal));
         ctx.camera.radius = computeIdealRadius();
 
         // Build light meshes
@@ -2019,6 +2035,13 @@ export default function ConfigEditor() {
     },
     [displayEditIdx, flushGizmoPosition, scheduleGizmoPosition, showDisplayOutline],
   );
+
+  useEffect(() => {
+    if (!displayPanelOpen) return;
+    const info = displayPreviewInfoRef.current;
+    if (!info) return;
+    handleDisplayPreviewChange(info);
+  }, [displayNormal, displayPanelOpen, handleDisplayPreviewChange]);
 
   const handleSaveDisplay = useCallback(
     async (cfg: DisplayConfig) => {
@@ -2967,6 +2990,8 @@ export default function ConfigEditor() {
           onPreviewChange={handlePreviewChange}
           placingMode={placingMode}
           haEntities={haEntities}
+          defaultSize={editorDefaultSizes.light}
+          defaultNanoleafSize={editorDefaultSizes.nanoleaf}
         />
 
         <DisplayForm
@@ -2976,6 +3001,7 @@ export default function ConfigEditor() {
           position={position}
           normal={displayNormal}
           onPositionChange={handlePositionChange}
+          onNormalChange={setDisplayNormal}
           onSave={handleSaveDisplay}
           onClose={handleCloseDisplayPanel}
           onEnterPlacingMode={enterPlacingMode}
@@ -2983,6 +3009,7 @@ export default function ConfigEditor() {
           onPreviewChange={handleDisplayPreviewChange}
           placingMode={placingMode}
           haEntities={haEntities}
+          defaultSize={editorDefaultSizes.screen}
         />
 
         <BlindForm
@@ -2998,6 +3025,7 @@ export default function ConfigEditor() {
           onPreviewChange={handleBlindPreviewChange}
           placingMode={placingMode}
           haEntities={haEntities}
+          defaultSize={editorDefaultSizes.blind}
         />
 
         <ShadowWallForm
@@ -3012,6 +3040,7 @@ export default function ConfigEditor() {
           onExitPlacingMode={exitPlacingMode}
           onPreviewChange={handleWallPreviewChange}
           placingMode={placingMode}
+          defaultSize={editorDefaultSizes.wall}
         />
 
         <TubeForm
@@ -3023,6 +3052,7 @@ export default function ConfigEditor() {
           onClose={handleCloseTubePanel}
           onPreviewChange={handleTubePreviewChange}
           haEntities={haEntities}
+          defaultSettings={editorDefaultSizes.tube}
         />
       </div>
 

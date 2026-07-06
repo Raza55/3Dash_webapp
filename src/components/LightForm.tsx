@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import type { LightConfig, LightType, LightPosition, LightPart, HitboxConfig, LightShape } from '../types';
+import { fineSliderRange } from '../utils/editorControls';
 import { FormPanel, AccordionSection } from './FormPanel';
 import EntityPicker, { type HAEntityOption } from './EntityPicker';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -20,6 +21,14 @@ interface PartState {
 const ZERO_ROTATION: LightPosition = { x: 0, y: 0, z: 0 };
 const UNIT_SCALE: LightPosition = { x: 1, y: 1, z: 1 };
 const NANOLEAF_DEFAULT_SIZE = { width: 1.15, height: 0.78, depth: 0.035 };
+const LIGHT_DEFAULT_SIZE = {
+  diameter: 0.18,
+  width: 0.2,
+  height: 0.2,
+  depth: 0.2,
+  hitboxDiameter: 0.45,
+  hitboxBox: 0.4,
+};
 
 function cloneVector(v: LightPosition | undefined, fallback: LightPosition): LightPosition {
   return { x: v?.x ?? fallback.x, y: v?.y ?? fallback.y, z: v?.z ?? fallback.z };
@@ -80,12 +89,12 @@ function VectorFields({
   );
 }
 
-const defaultPart = (pos: LightPosition): PartState => ({
+const defaultPart = (pos: LightPosition, defaults = LIGHT_DEFAULT_SIZE): PartState => ({
   shape: 'cube',
-  diameter: 0.25,
-  width: 0.3,
-  height: 0.3,
-  depth: 0.3,
+  diameter: defaults.diameter,
+  width: defaults.width,
+  height: defaults.height,
+  depth: defaults.depth,
   posX: pos.x,
   posY: pos.y,
   posZ: pos.z,
@@ -159,6 +168,8 @@ interface Props {
   onPreviewChange: (info: PreviewInfo) => void;
   placingMode: boolean;
   haEntities?: HAEntityOption[];
+  defaultSize?: typeof LIGHT_DEFAULT_SIZE;
+  defaultNanoleafSize?: typeof NANOLEAF_DEFAULT_SIZE;
 }
 
 const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
@@ -173,6 +184,8 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
   onPreviewChange,
   placingMode,
   haEntities = [],
+  defaultSize = LIGHT_DEFAULT_SIZE,
+  defaultNanoleafSize = NANOLEAF_DEFAULT_SIZE,
 }, ref) {
   const t = useTranslation();
   const [entityId, setEntityId] = useState('');
@@ -273,10 +286,10 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
       setLabel('');
       setType('toggle');
       setShape('sphere');
-      setDiameter(0.25);
-      setWidth(0.3);
-      setHeight(0.3);
-      setDepth(0.3);
+      setDiameter(defaultSize.diameter);
+      setWidth(defaultSize.width);
+      setHeight(defaultSize.height);
+      setDepth(defaultSize.depth);
       setRotation(cloneVector(undefined, ZERO_ROTATION));
       setScale(cloneVector(undefined, UNIT_SCALE));
       setWarmth(3000);
@@ -286,17 +299,17 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
       setParts([]);
       setUseCustomHitbox(false);
       setHbShape('sphere');
-      setHbDiameter(0.5);
-      setHbWidth(0.5);
-      setHbHeight(0.5);
-      setHbDepth(0.5);
+      setHbDiameter(defaultSize.hitboxDiameter);
+      setHbWidth(defaultSize.hitboxBox);
+      setHbHeight(defaultSize.hitboxBox);
+      setHbDepth(defaultSize.hitboxBox);
       setHbPosX(0);
       setHbPosY(2.5);
       setHbPosZ(0);
       setHbRotation(cloneVector(undefined, ZERO_ROTATION));
       setHbScale(cloneVector(undefined, UNIT_SCALE));
     }
-  }, [editLight, open]);
+  }, [editLight, open, defaultSize.diameter, defaultSize.width, defaultSize.height, defaultSize.depth, defaultSize.hitboxDiameter, defaultSize.hitboxBox]);
 
   // Notify parent of shape/size changes for preview mesh
   useEffect(() => {
@@ -391,8 +404,8 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
   }, []);
 
   const addPart = useCallback(() => {
-    setParts(prev => [...prev, defaultPart(position)]);
-  }, [position]);
+    setParts(prev => [...prev, defaultPart(position, defaultSize)]);
+  }, [defaultSize, position]);
 
   const removePart = useCallback((idx: number) => {
     setParts(prev => prev.filter((_, i) => i !== idx));
@@ -400,11 +413,11 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
 
   const applyNanoleafDefaults = useCallback(() => {
     setShape('nanoleafShapes');
-    setWidth(NANOLEAF_DEFAULT_SIZE.width);
-    setHeight(NANOLEAF_DEFAULT_SIZE.height);
-    setDepth(NANOLEAF_DEFAULT_SIZE.depth);
+    setWidth(defaultNanoleafSize.width);
+    setHeight(defaultNanoleafSize.height);
+    setDepth(defaultNanoleafSize.depth);
     setBrightness((prev) => Math.max(prev, 1.2));
-  }, []);
+  }, [defaultNanoleafSize.depth, defaultNanoleafSize.height, defaultNanoleafSize.width]);
 
   const handleTypeChange = useCallback((nextType: LightType) => {
     setType(nextType);
@@ -416,11 +429,11 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
   const handleShapeChange = useCallback((nextShape: LightShape) => {
     setShape(nextShape);
     if (nextShape === 'nanoleafShapes') {
-      setWidth(NANOLEAF_DEFAULT_SIZE.width);
-      setHeight(NANOLEAF_DEFAULT_SIZE.height);
-      setDepth(NANOLEAF_DEFAULT_SIZE.depth);
+      setWidth(defaultNanoleafSize.width);
+      setHeight(defaultNanoleafSize.height);
+      setDepth(defaultNanoleafSize.depth);
     }
-  }, []);
+  }, [defaultNanoleafSize.depth, defaultNanoleafSize.height, defaultNanoleafSize.width]);
 
   const footer = (
     <>
@@ -587,7 +600,7 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
                     onChange={(e) => {
                       const nextShape = e.target.value as LightShape;
                       updatePart(idx, nextShape === 'nanoleafShapes'
-                        ? { shape: nextShape, ...NANOLEAF_DEFAULT_SIZE }
+                        ? { shape: nextShape, ...defaultNanoleafSize }
                         : { shape: nextShape });
                     }}
                   >
@@ -633,30 +646,33 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
 
                 <div className="field-label" style={{ marginTop: 4, marginBottom: 2 }}>{t('form.position')}</div>
                 {([
-                  { label: 'X', color: '#f87171', key: 'posX' as const, range: [-30, 30] as [number, number] },
-                  { label: 'Z', color: '#4ade80', key: 'posY' as const, range: [-2, 10] as [number, number] },
-                  { label: 'Y', color: '#38bdf8', key: 'posZ' as const, range: [-30, 30] as [number, number] },
-                ]).map(({ label: axLabel, color, key, range }) => (
-                  <div key={`part-${idx}-${key}`} className="pos-grid">
-                    <span className="pos-axis" style={{ color }}>{axLabel}</span>
-                    <input
-                      type="range"
-                      className="pos-slider"
-                      min={range[0]}
-                      max={range[1]}
-                      step={0.05}
-                      value={part[key]}
-                      onChange={(e) => updatePart(idx, { [key]: parseFloat(e.target.value) })}
-                    />
-                    <input
-                      type="number"
-                      className="pos-num"
-                      step={0.05}
-                      value={part[key]}
-                      onChange={(e) => updatePart(idx, { [key]: parseFloat(e.target.value) || 0 })}
-                    />
-                  </div>
-                ))}
+                  { label: 'X', color: '#f87171', key: 'posX' as const, span: 2 },
+                  { label: 'Z', color: '#4ade80', key: 'posY' as const, span: 0.8 },
+                  { label: 'Y', color: '#38bdf8', key: 'posZ' as const, span: 2 },
+                ]).map(({ label: axLabel, color, key, span }) => {
+                  const range = fineSliderRange(part[key], span);
+                  return (
+                    <div key={`part-${idx}-${key}`} className="pos-grid">
+                      <span className="pos-axis" style={{ color }}>{axLabel}</span>
+                      <input
+                        type="range"
+                        className="pos-slider"
+                        min={range.min}
+                        max={range.max}
+                        step={0.01}
+                        value={part[key]}
+                        onChange={(e) => updatePart(idx, { [key]: parseFloat(e.target.value) })}
+                      />
+                      <input
+                        type="number"
+                        className="pos-num"
+                        step={0.01}
+                        value={part[key]}
+                        onChange={(e) => updatePart(idx, { [key]: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+                  );
+                })}
 
                 <VectorFields
                   label={t('form.visualRotation')}
@@ -854,30 +870,33 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
 
             <span className="field-label" style={{ marginTop: 4 }}>{t('form.hitboxPosition')}</span>
             {([
-              { label: 'X', color: '#f87171', axis: 'x' as const, value: hbPosX, setter: setHbPosX, range: [-30, 30] as [number, number] },
-              { label: 'Z', color: '#4ade80', axis: 'y' as const, value: hbPosY, setter: setHbPosY, range: [-2, 10] as [number, number] },
-              { label: 'Y', color: '#38bdf8', axis: 'z' as const, value: hbPosZ, setter: setHbPosZ, range: [-30, 30] as [number, number] },
-            ]).map(({ label: axLabel, color, axis, value, setter, range }) => (
-              <div key={`hb-${axis}`} className="pos-grid">
-                <span className="pos-axis" style={{ color }}>{axLabel}</span>
-                <input
-                  type="range"
-                  className="pos-slider"
-                  min={range[0]}
-                  max={range[1]}
-                  step={0.05}
-                  value={value}
-                  onChange={(e) => setter(parseFloat(e.target.value))}
-                />
-                <input
-                  type="number"
-                  className="pos-num"
-                  step={0.05}
-                  value={value}
-                  onChange={(e) => setter(parseFloat(e.target.value) || 0)}
-                />
-              </div>
-            ))}
+              { label: 'X', color: '#f87171', axis: 'x' as const, value: hbPosX, setter: setHbPosX, span: 2 },
+              { label: 'Z', color: '#4ade80', axis: 'y' as const, value: hbPosY, setter: setHbPosY, span: 0.8 },
+              { label: 'Y', color: '#38bdf8', axis: 'z' as const, value: hbPosZ, setter: setHbPosZ, span: 2 },
+            ]).map(({ label: axLabel, color, axis, value, setter, span }) => {
+              const range = fineSliderRange(value, span);
+              return (
+                <div key={`hb-${axis}`} className="pos-grid">
+                  <span className="pos-axis" style={{ color }}>{axLabel}</span>
+                  <input
+                    type="range"
+                    className="pos-slider"
+                    min={range.min}
+                    max={range.max}
+                    step={0.01}
+                    value={value}
+                    onChange={(e) => setter(parseFloat(e.target.value))}
+                  />
+                  <input
+                    type="number"
+                    className="pos-num"
+                    step={0.01}
+                    value={value}
+                    onChange={(e) => setter(parseFloat(e.target.value) || 0)}
+                  />
+                </div>
+              );
+            })}
 
             <VectorFields
               label={t('form.visualRotation')}
@@ -903,32 +922,35 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
         />
 
         {([
-          { label: 'X', color: '#f87171', babylonAxis: 'x' as const, range: [-30, 30] as [number, number] },
-          { label: 'Z', color: '#4ade80', babylonAxis: 'y' as const, range: [-2, 10] as [number, number] },
-          { label: 'Y', color: '#38bdf8', babylonAxis: 'z' as const, range: [-30, 30] as [number, number] },
-        ]).map(({ label, color, babylonAxis, range }) => (
-          <div key={babylonAxis} className="pos-grid">
-            <span className="pos-axis" style={{ color }}>
-              {label}
-            </span>
-            <input
-              type="range"
-              className="pos-slider"
-              min={range[0]}
-              max={range[1]}
-              step={0.05}
-              value={position[babylonAxis]}
-              onChange={(e) => handlePosChange(babylonAxis, parseFloat(e.target.value))}
-            />
-            <input
-              type="number"
-              className="pos-num"
-              step={0.05}
-              value={position[babylonAxis]}
-              onChange={(e) => handlePosChange(babylonAxis, parseFloat(e.target.value) || 0)}
-            />
-          </div>
-        ))}
+          { label: 'X', color: '#f87171', babylonAxis: 'x' as const, span: 2 },
+          { label: 'Z', color: '#4ade80', babylonAxis: 'y' as const, span: 0.8 },
+          { label: 'Y', color: '#38bdf8', babylonAxis: 'z' as const, span: 2 },
+        ]).map(({ label, color, babylonAxis, span }) => {
+          const range = fineSliderRange(position[babylonAxis], span);
+          return (
+            <div key={babylonAxis} className="pos-grid">
+              <span className="pos-axis" style={{ color }}>
+                {label}
+              </span>
+              <input
+                type="range"
+                className="pos-slider"
+                min={range.min}
+                max={range.max}
+                step={0.01}
+                value={position[babylonAxis]}
+                onChange={(e) => handlePosChange(babylonAxis, parseFloat(e.target.value))}
+              />
+              <input
+                type="number"
+                className="pos-num"
+                step={0.01}
+                value={position[babylonAxis]}
+                onChange={(e) => handlePosChange(babylonAxis, parseFloat(e.target.value) || 0)}
+              />
+            </div>
+          );
+        })}
       </AccordionSection>
     </FormPanel>
   );

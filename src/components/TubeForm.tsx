@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { TubeConfig, TubeLineConfig, TubeInputUnit, TubeOriginDirection, LightPosition } from '../types';
 import { generateUUID } from '../utils/uuid';
+import { fineSliderRange } from '../utils/editorControls';
 import LucideIcon from './SidePanel/cards/LucideIcon';
 import { FormPanel, AccordionSection } from './FormPanel';
 import EntityPicker, { type HAEntityOption } from './EntityPicker';
@@ -19,6 +20,7 @@ interface Props {
   onClose: () => void;
   onPreviewChange: (info: TubePreviewInfo) => void;
   haEntities?: HAEntityOption[];
+  defaultSettings?: { diameter: number; fontSize: number; gap: number; labelHeight: number };
 }
 
 const UNIT_OPTIONS: TubeInputUnit[] = ['b', 'kb', 'mb', 'gb', 'tb', 'B', 'kB', 'mB', 'gB', 'tB'];
@@ -36,6 +38,7 @@ export default function TubeForm({
   onClose,
   onPreviewChange,
   haEntities = [],
+  defaultSettings = { diameter: 0.05, fontSize: 36, gap: 0.16, labelHeight: 0.2 },
 }: Props) {
   const t = useTranslation();
   const [label, setLabel] = useState('');
@@ -83,14 +86,14 @@ export default function TubeForm({
     } else {
       setLabel('');
       setOriginDirection('left');
-      setDiameter(0.08);
-      setFontSize(48);
-      setGap(0.25);
+      setDiameter(defaultSettings.diameter);
+      setFontSize(defaultSettings.fontSize);
+      setGap(defaultSettings.gap);
       setLabelPosition(0.95);
-      setLabelHeight(0.3);
+      setLabelHeight(defaultSettings.labelHeight);
       setLines([defaultLine()]);
     }
-  }, [open, editTube]);
+  }, [open, editTube, defaultSettings.diameter, defaultSettings.fontSize, defaultSettings.gap, defaultSettings.labelHeight]);
 
   // Build a config snapshot for preview
   const buildConfig = useCallback((): TubeConfig => ({
@@ -270,27 +273,30 @@ export default function TubeForm({
         {([
           { label: 'X', color: '#f87171', axis: 'x' as const },
           { label: 'Y', color: '#38bdf8', axis: 'z' as const },
-        ]).map(({ label: lbl, color, axis }) => (
-          <div key={axis} className="pos-grid">
-            <span className="pos-axis" style={{ color }}>{lbl}</span>
-            <input
-              type="range"
-              className="pos-slider"
-              min={-15}
-              max={15}
-              step={0.05}
-              value={position[axis]}
-              onChange={(e) => handlePosChange(axis, parseFloat(e.target.value))}
-            />
-            <input
-              type="number"
-              className="pos-num"
-              step={0.05}
-              value={position[axis]}
-              onChange={(e) => handlePosChange(axis, parseFloat(e.target.value) || 0)}
-            />
-          </div>
-        ))}
+        ]).map(({ label: lbl, color, axis }) => {
+          const range = fineSliderRange(position[axis], 2);
+          return (
+            <div key={axis} className="pos-grid">
+              <span className="pos-axis" style={{ color }}>{lbl}</span>
+              <input
+                type="range"
+                className="pos-slider"
+                min={range.min}
+                max={range.max}
+                step={0.01}
+                value={position[axis]}
+                onChange={(e) => handlePosChange(axis, parseFloat(e.target.value))}
+              />
+              <input
+                type="number"
+                className="pos-num"
+                step={0.01}
+                value={position[axis]}
+                onChange={(e) => handlePosChange(axis, parseFloat(e.target.value) || 0)}
+              />
+            </div>
+          );
+        })}
       </AccordionSection>
 
       <AccordionSection title={t('form.sensorLines')} defaultOpen>

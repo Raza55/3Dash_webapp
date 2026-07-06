@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import type { BlindConfig, LightPosition } from '../types';
 import { generateUUID } from '../utils/uuid';
+import { fineSliderRange } from '../utils/editorControls';
 import { FormPanel, AccordionSection } from './FormPanel';
 import EntityPicker, { type HAEntityOption } from './EntityPicker';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -28,6 +29,7 @@ interface Props {
   onPreviewChange: (info: BlindPreviewInfo) => void;
   placingMode: boolean;
   haEntities?: HAEntityOption[];
+  defaultSize?: { width: number; height: number; depth: number };
 }
 
 const BlindForm = forwardRef<BlindFormHandle, Props>(function BlindForm({
@@ -42,6 +44,7 @@ const BlindForm = forwardRef<BlindFormHandle, Props>(function BlindForm({
   onPreviewChange,
   placingMode,
   haEntities = [],
+  defaultSize = { width: 0.7, height: 0.9, depth: 0.025 },
 }: Props, ref) {
   const t = useTranslation();
   const [entityId, setEntityId] = useState('');
@@ -76,13 +79,13 @@ const BlindForm = forwardRef<BlindFormHandle, Props>(function BlindForm({
     } else {
       setEntityId('');
       setLabel('');
-      setWidth(1.2);
-      setHeight(1.6);
-      setDepth(0.04);
+      setWidth(defaultSize.width);
+      setHeight(defaultSize.height);
+      setDepth(defaultSize.depth);
       setRotationY(0);
       setSlats(10);
     }
-  }, [open, editBlind]);
+  }, [open, editBlind, defaultSize.width, defaultSize.height, defaultSize.depth]);
 
   useEffect(() => {
     if (!open) return;
@@ -202,15 +205,20 @@ const BlindForm = forwardRef<BlindFormHandle, Props>(function BlindForm({
 
         <div className="field-group">
           <label className="field-label">{t('form.rotation', { value: rotationY })}</label>
+          {(() => {
+            const range = fineSliderRange(rotationY, 45, -180, 180);
+            return (
           <input
             type="range"
             className="pos-slider"
-            min={-180}
-            max={180}
-            step={1}
+            min={range.min}
+            max={range.max}
+            step={0.5}
             value={rotationY}
-            onChange={(e) => setRotationY(parseInt(e.target.value, 10))}
+            onChange={(e) => setRotationY(parseFloat(e.target.value))}
           />
+            );
+          })()}
         </div>
 
         <div className="field-group">
@@ -234,30 +242,33 @@ const BlindForm = forwardRef<BlindFormHandle, Props>(function BlindForm({
         />
 
         {([
-          { label: 'X', color: '#f87171', babylonAxis: 'x' as const, range: [-30, 30] as [number, number] },
-          { label: 'Z', color: '#4ade80', babylonAxis: 'y' as const, range: [-2, 10] as [number, number] },
-          { label: 'Y', color: '#38bdf8', babylonAxis: 'z' as const, range: [-30, 30] as [number, number] },
-        ]).map(({ label: lbl, color, babylonAxis, range }) => (
-          <div key={babylonAxis} className="pos-grid">
-            <span className="pos-axis" style={{ color }}>{lbl}</span>
-            <input
-              type="range"
-              className="pos-slider"
-              min={range[0]}
-              max={range[1]}
-              step={0.05}
-              value={position[babylonAxis]}
-              onChange={(e) => handlePosChange(babylonAxis, parseFloat(e.target.value))}
-            />
-            <input
-              type="number"
-              className="pos-num"
-              step={0.05}
-              value={position[babylonAxis]}
-              onChange={(e) => handlePosChange(babylonAxis, parseFloat(e.target.value) || 0)}
-            />
-          </div>
-        ))}
+          { label: 'X', color: '#f87171', babylonAxis: 'x' as const, span: 2 },
+          { label: 'Z', color: '#4ade80', babylonAxis: 'y' as const, span: 0.8 },
+          { label: 'Y', color: '#38bdf8', babylonAxis: 'z' as const, span: 2 },
+        ]).map(({ label: lbl, color, babylonAxis, span }) => {
+          const range = fineSliderRange(position[babylonAxis], span);
+          return (
+            <div key={babylonAxis} className="pos-grid">
+              <span className="pos-axis" style={{ color }}>{lbl}</span>
+              <input
+                type="range"
+                className="pos-slider"
+                min={range.min}
+                max={range.max}
+                step={0.01}
+                value={position[babylonAxis]}
+                onChange={(e) => handlePosChange(babylonAxis, parseFloat(e.target.value))}
+              />
+              <input
+                type="number"
+                className="pos-num"
+                step={0.01}
+                value={position[babylonAxis]}
+                onChange={(e) => handlePosChange(babylonAxis, parseFloat(e.target.value) || 0)}
+              />
+            </div>
+          );
+        })}
       </AccordionSection>
     </FormPanel>
   );
