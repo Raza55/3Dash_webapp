@@ -1,5 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from '../contexts/LanguageContext';
+import type { LightPosition, ModelObjectTransform } from '../types';
+import { VectorSliderFields } from './EditorSliderControls';
 
 export type ModelObjectEditMode = 'move' | 'rotate' | 'scale';
 
@@ -16,6 +18,19 @@ interface Props {
   onResetSelected: () => void;
   onUploadObject: (file: File) => void;
   onDeleteSelected?: () => void;
+  selectedTransform?: ModelObjectTransform | null;
+  onTransformChange?: (transform: Required<ModelObjectTransform>) => void;
+}
+
+const ZERO_VECTOR: LightPosition = { x: 0, y: 0, z: 0 };
+const UNIT_VECTOR: LightPosition = { x: 1, y: 1, z: 1 };
+
+function completeTransform(transform: ModelObjectTransform | null | undefined): Required<ModelObjectTransform> {
+  return {
+    position: transform?.position ?? ZERO_VECTOR,
+    rotation: transform?.rotation ?? ZERO_VECTOR,
+    scale: transform?.scale ?? UNIT_VECTOR,
+  };
 }
 
 export default function ModelObjectList({
@@ -25,11 +40,14 @@ export default function ModelObjectList({
   onResetSelected,
   onUploadObject,
   onDeleteSelected,
+  selectedTransform,
+  onTransformChange,
 }: Props) {
   const t = useTranslation();
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
   const selected = objects.find((obj) => obj.id === selectedId);
+  const transform = selectedId ? completeTransform(selectedTransform) : null;
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return objects;
@@ -81,6 +99,38 @@ export default function ModelObjectList({
           </button>
         ) : null}
       </div>
+
+      {transform && onTransformChange ? (
+        <div className="model-object-tools" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+          <VectorSliderFields
+            label={t('form.position')}
+            value={transform.position}
+            step={0.01}
+            span={2}
+            axisLabels={{ x: 'X', y: 'Z', z: 'Y' }}
+            axisColors={{ x: '#f87171', y: '#4ade80', z: '#38bdf8' }}
+            onChange={(position) => onTransformChange({ ...transform, position })}
+          />
+          <VectorSliderFields
+            label={t('form.orientation')}
+            value={transform.rotation}
+            step={0.5}
+            span={45}
+            min={-180}
+            max={180}
+            onChange={(rotation) => onTransformChange({ ...transform, rotation })}
+          />
+          <VectorSliderFields
+            label={t('form.visualScale')}
+            value={transform.scale}
+            min={0.001}
+            max={20}
+            step={0.01}
+            span={0.5}
+            onChange={(scale) => onTransformChange({ ...transform, scale })}
+          />
+        </div>
+      ) : null}
 
       {filtered.length === 0 ? (
         <div className="list-empty">{t('modelObjects.noneFound')}</div>

@@ -74,7 +74,7 @@ import { sceneRelativeDefaults, type SceneRelativeDefaults } from '../../utils/e
 import { useTranslation } from '../../contexts/LanguageContext';
 import GuidedTour from '../../components/GuidedTour/GuidedTour';
 import { editorTourSteps } from '../../components/GuidedTour/tourSteps';
-import type { LightConfig, LightGroup, DisplayConfig, BlindConfig, ShadowWallConfig, TubeConfig, LightPosition, HAState, ImportedModelObjectConfig, ModelObjectOverride } from '../../types';
+import type { LightConfig, LightGroup, DisplayConfig, BlindConfig, ShadowWallConfig, TubeConfig, LightPosition, HAState, ImportedModelObjectConfig, ModelObjectOverride, ModelObjectTransform } from '../../types';
 import './ConfigEditor.css';
 
 type ActiveGizmo = PositionGizmo | RotationGizmo | ScaleGizmo;
@@ -267,11 +267,13 @@ export default function ConfigEditor() {
   const [modelObjects, setModelObjects] = useState<ModelObjectListItem[]>([]);
   const baseModelObjectsRef = useRef<ModelObjectListItem[]>([]);
   const [selectedModelObjectId, setSelectedModelObjectId] = useState<string | null>(null);
+  const [selectedModelObjectTransform, setSelectedModelObjectTransform] = useState<ModelObjectTransform | null>(null);
   const [transformMode, setTransformMode] = useState<EditorTransformMode>('move');
   const transformModeRef = useRef<EditorTransformMode>(transformMode);
   transformModeRef.current = transformMode;
   const modelObjectOverridesRef = useRef<ModelObjectOverride[]>([]);
   const importedModelObjectsRef = useRef<ImportedModelObjectConfig[]>([]);
+  const modelObjectPersistTimerRef = useRef<number | null>(null);
 
   // Load HA entity list for autocomplete in forms (cache-first, else fetch fresh).
   useEffect(() => {
@@ -468,7 +470,7 @@ export default function ConfigEditor() {
     }
   }, []);
 
-  const persistModelObjectOverride = useCallback((mesh: AbstractMesh) => {
+  const persistModelObjectOverride = useCallback((mesh: AbstractMesh, showSavedToast = true) => {
     const id = mesh.metadata?.modelObjectId as string | undefined;
     if (!id) return;
 
@@ -490,7 +492,7 @@ export default function ConfigEditor() {
           importedObjects: updatedObjects,
         },
       });
-      showToast(t('editor.modelObjectSaved'));
+      if (showSavedToast) showToast(t('editor.modelObjectSaved'));
       return;
     }
 
@@ -509,7 +511,7 @@ export default function ConfigEditor() {
         importedObjects: cfg.model?.importedObjects ?? [],
       },
     });
-    showToast(t('editor.modelObjectSaved'));
+    if (showSavedToast) showToast(t('editor.modelObjectSaved'));
   }, [showToast, t]);
 
   const centerModelObjectPivot = useCallback((mesh: AbstractMesh) => {
@@ -540,7 +542,10 @@ export default function ConfigEditor() {
     const gizmo = createGizmoForMode(mode, utilLayerRef.current);
     gizmo.anchorPoint = GizmoAnchorPoint.Pivot;
     gizmo.attachedMesh = mesh;
-    gizmo.onDragEndObservable.add(() => persistModelObjectOverride(mesh));
+    gizmo.onDragEndObservable.add(() => {
+      setSelectedModelObjectTransform(readModelObjectTransform(mesh));
+      persistModelObjectOverride(mesh);
+    });
 
     setUtilityMeshAlpha(utilLayerRef.current, 0.55);
     modelObjectGizmoRef.current = gizmo;
@@ -580,6 +585,7 @@ export default function ConfigEditor() {
         },
       });
       syncModelObjectList(updatedObjects);
+      setSelectedModelObjectTransform(readModelObjectTransform(mesh));
       attachModelObjectGizmo(mesh, transformModeRef.current);
       showToast(t('editor.modelObjectReset'));
       return;
@@ -600,6 +606,7 @@ export default function ConfigEditor() {
         importedObjects: cfg.model?.importedObjects ?? [],
       },
     });
+    setSelectedModelObjectTransform(readModelObjectTransform(mesh));
     attachModelObjectGizmo(mesh, transformModeRef.current);
     showToast(t('editor.modelObjectReset'));
   }, [attachModelObjectGizmo, selectedModelObjectId, showToast, syncModelObjectList, t]);
@@ -686,18 +693,54 @@ export default function ConfigEditor() {
     });
     syncModelObjectList(updatedObjects);
     setSelectedModelObjectId(null);
+    setSelectedModelObjectTransform(null);
     showToast(t('modelObjects.deletedToast'));
   }, [selectedModelObjectId, showToast, syncModelObjectList, t]);
+
+  const handleModelObjectTransformChange = useCallback((transform: Required<ModelObjectTransform>) => {
+    if (!selectedModelObjectId) return;
+    const mesh = modelObjectMeshesRef.current[selectedModelObjectId];
+    if (!mesh) return;
+
+    const nextTransform: Required<ModelObjectTransform> = {
+      position: transform.position,
+      rotation: transform.rotation,
+      scale: {
+        x: Math.max(0.001, transform.scale.x),
+        y: Math.max(0.001, transform.scale.y),
+        z: Math.max(0.001, transform.scale.z),
+      },
+    };
+
+    applyModelObjectTransform(mesh, nextTransform);
+    setSelectedModelObjectTransform(readModelObjectTransform(mesh));
+
+    if (modelObjectPersistTimerRef.current !== null) {
+      window.clearTimeout(modelObjectPersistTimerRef.current);
+    }
+    modelObjectPersistTimerRef.current = window.setTimeout(() => {
+      persistModelObjectOverride(mesh, false);
+      modelObjectPersistTimerRef.current = null;
+    }, 250);
+  }, [persistModelObjectOverride, selectedModelObjectId]);
+
+  useEffect(() => () => {
+    if (modelObjectPersistTimerRef.current !== null) {
+      window.clearTimeout(modelObjectPersistTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     if (editorMode !== 'modelObjects') {
       detachModelObjectGizmo();
+      setSelectedModelObjectTransform(null);
       return;
     }
 
     const mesh = selectedModelObjectId ? modelObjectMeshesRef.current[selectedModelObjectId] : null;
     if (!mesh) {
       detachModelObjectGizmo();
+      setSelectedModelObjectTransform(null);
       return;
     }
 
@@ -706,6 +749,7 @@ export default function ConfigEditor() {
     }
     selectedModelObjectMeshRef.current = mesh;
     mesh.showBoundingBox = true;
+    setSelectedModelObjectTransform(readModelObjectTransform(mesh));
     attachModelObjectGizmo(mesh, transformMode);
   }, [attachModelObjectGizmo, detachModelObjectGizmo, editorMode, selectedModelObjectId, transformMode]);
 
@@ -2900,6 +2944,8 @@ export default function ConfigEditor() {
               onResetSelected={handleResetSelectedModelObject}
               onUploadObject={handleUploadModelObject}
               onDeleteSelected={handleDeleteSelectedModelObject}
+              selectedTransform={selectedModelObjectTransform}
+              onTransformChange={handleModelObjectTransformChange}
             />
           )}
         </div>

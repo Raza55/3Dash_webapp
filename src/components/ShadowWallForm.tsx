@@ -176,7 +176,7 @@ const ShadowWallForm = forwardRef<ShadowWallFormHandle, Props>(function ShadowWa
         })}
       </AccordionSection>
 
-      <AccordionSection title={t('form.rotation')}>
+      <AccordionSection title={t('form.orientation')}>
         {([
           { label: 'X', axis: 'x' as const },
           { label: 'Y', axis: 'y' as const },

@@ -4,6 +4,7 @@ import { fineSliderRange } from '../utils/editorControls';
 import { FormPanel, AccordionSection } from './FormPanel';
 import EntityPicker, { type HAEntityOption } from './EntityPicker';
 import { useTranslation } from '../contexts/LanguageContext';
+import { SliderNumberRow, VectorSliderFields } from './EditorSliderControls';
 
 interface PartState {
   shape: LightShape;
@@ -48,45 +49,6 @@ function optionalRotation(v: LightPosition): LightPosition | undefined {
 
 function optionalScale(v: LightPosition): LightPosition | undefined {
   return isUnitVector(v) ? undefined : v;
-}
-
-function VectorFields({
-  label,
-  value,
-  onChange,
-  min,
-  step,
-}: {
-  label: string;
-  value: LightPosition;
-  onChange: (value: LightPosition) => void;
-  min?: number;
-  step: number;
-}) {
-  const update = (axis: keyof LightPosition, raw: string) => {
-    const next = parseFloat(raw);
-    onChange({ ...value, [axis]: Number.isFinite(next) ? next : value[axis] });
-  };
-  return (
-    <div className="field-group">
-      <label className="field-label">{label}</label>
-      <div className="row3">
-        {(['x', 'y', 'z'] as const).map((axis) => (
-          <div className="field-group" key={axis}>
-            <label className="field-label">{axis.toUpperCase()}</label>
-            <input
-              type="number"
-              className="field-input"
-              min={min}
-              step={step}
-              value={value[axis]}
-              onChange={(e) => update(axis, e.target.value)}
-            />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 const defaultPart = (pos: LightPosition, defaults = LIGHT_DEFAULT_SIZE): PartState => ({
@@ -614,33 +576,38 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
                 {part.shape === 'sphere' ? (
                   <div className="field-group">
                     <label className="field-label">{t('form.diameter')}</label>
-                    <input
-                      type="number"
-                      className="field-input"
+                    <SliderNumberRow
+                      label="D"
+                      title={t('form.diameter')}
                       value={part.diameter}
-                      step={0.05}
+                      step={0.01}
+                      span={0.35}
                       min={0.05}
-                      max={2}
-                      onChange={(e) => updatePart(idx, { diameter: parseFloat(e.target.value) || 0.25 })}
+                      max={8}
+                      fallback={defaultSize.diameter}
+                      onChange={(value) => updatePart(idx, { diameter: value })}
                     />
                   </div>
                 ) : (
-                  <div className="row3">
-                    <div className="field-group">
-                      <label className="field-label">W</label>
-                      <input type="number" className="field-input" value={part.width} step={0.05} min={0.05}
-                        onChange={(e) => updatePart(idx, { width: parseFloat(e.target.value) || 0.3 })} />
-                    </div>
-                    <div className="field-group">
-                      <label className="field-label">H</label>
-                      <input type="number" className="field-input" value={part.height} step={0.05} min={0.05}
-                        onChange={(e) => updatePart(idx, { height: parseFloat(e.target.value) || 0.3 })} />
-                    </div>
-                    <div className="field-group">
-                      <label className="field-label">D</label>
-                      <input type="number" className="field-input" value={part.depth} step={0.05} min={0.05}
-                        onChange={(e) => updatePart(idx, { depth: parseFloat(e.target.value) || 0.3 })} />
-                    </div>
+                  <div className="field-group">
+                    {([
+                      { label: 'W', title: t('form.width'), value: part.width, key: 'width' as const, fallback: defaultSize.width },
+                      { label: 'H', title: t('form.height'), value: part.height, key: 'height' as const, fallback: defaultSize.height },
+                      { label: 'D', title: t('form.depth'), value: part.depth, key: 'depth' as const, fallback: defaultSize.depth },
+                    ]).map(({ label: sizeLabel, title, value, key, fallback }) => (
+                      <SliderNumberRow
+                        key={`part-${idx}-size-${key}`}
+                        label={sizeLabel}
+                        title={title}
+                        value={value}
+                        step={0.01}
+                        span={0.35}
+                        min={0.05}
+                        max={8}
+                        fallback={fallback}
+                        onChange={(next) => updatePart(idx, { [key]: next })}
+                      />
+                    ))}
                   </div>
                 )}
 
@@ -674,17 +641,22 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
                   );
                 })}
 
-                <VectorFields
-                  label={t('form.visualRotation')}
+                <VectorSliderFields
+                  label={t('form.orientation')}
                   value={part.rotation}
-                  step={5}
+                  step={0.5}
+                  span={45}
+                  min={-180}
+                  max={180}
                   onChange={(value) => updatePart(idx, { rotation: value })}
                 />
-                <VectorFields
+                <VectorSliderFields
                   label={t('form.visualScale')}
                   value={part.scale}
                   min={0.001}
-                  step={0.1}
+                  max={20}
+                  step={0.01}
+                  span={0.5}
                   onChange={(value) => updatePart(idx, { scale: value })}
                 />
               </div>
@@ -716,65 +688,57 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
             {shape === 'sphere' ? (
               <div className="field-group">
                 <label className="field-label">{t('form.diameter')}</label>
-                <input
-                  type="number"
-                  className="field-input"
+                <SliderNumberRow
+                  label="D"
+                  title={t('form.diameter')}
                   value={diameter}
-                  step={0.05}
+                  step={0.01}
+                  span={0.35}
                   min={0.05}
-                  max={2}
-                  onChange={(e) => setDiameter(parseFloat(e.target.value) || 0.25)}
+                  max={8}
+                  fallback={defaultSize.diameter}
+                  onChange={setDiameter}
                 />
               </div>
             ) : (
-              <div className="row3">
-                <div className="field-group">
-                  <label className="field-label">{t('form.width')}</label>
-                  <input
-                    type="number"
-                    className="field-input"
-                    value={width}
-                    step={0.05}
+              <div className="field-group">
+                {([
+                  { label: 'W', title: t('form.width'), value: width, set: setWidth, fallback: defaultSize.width },
+                  { label: 'H', title: t('form.height'), value: height, set: setHeight, fallback: defaultSize.height },
+                  { label: 'D', title: t('form.depth'), value: depth, set: setDepth, fallback: defaultSize.depth },
+                ]).map(({ label: sizeLabel, title, value, set, fallback }) => (
+                  <SliderNumberRow
+                    key={title}
+                    label={sizeLabel}
+                    title={title}
+                    value={value}
+                    step={0.01}
+                    span={0.35}
                     min={0.05}
-                    onChange={(e) => setWidth(parseFloat(e.target.value) || 0.3)}
+                    max={8}
+                    fallback={fallback}
+                    onChange={set}
                   />
-                </div>
-                <div className="field-group">
-                  <label className="field-label">{t('form.height')}</label>
-                  <input
-                    type="number"
-                    className="field-input"
-                    value={height}
-                    step={0.05}
-                    min={0.05}
-                    onChange={(e) => setHeight(parseFloat(e.target.value) || 0.3)}
-                  />
-                </div>
-                <div className="field-group">
-                  <label className="field-label">{t('form.depth')}</label>
-                  <input
-                    type="number"
-                    className="field-input"
-                    value={depth}
-                    step={0.05}
-                    min={0.05}
-                    onChange={(e) => setDepth(parseFloat(e.target.value) || 0.3)}
-                  />
-                </div>
+                ))}
               </div>
             )}
 
-            <VectorFields
-              label={t('form.visualRotation')}
+            <VectorSliderFields
+              label={t('form.orientation')}
               value={rotation}
-              step={5}
+              step={0.5}
+              span={45}
+              min={-180}
+              max={180}
               onChange={setRotation}
             />
-            <VectorFields
+            <VectorSliderFields
               label={t('form.visualScale')}
               value={scale}
               min={0.001}
-              step={0.1}
+              max={20}
+              step={0.01}
+              span={0.5}
               onChange={setScale}
             />
           </>
@@ -821,50 +785,38 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
             {hbShape === 'sphere' ? (
               <div className="field-group">
                 <label className="field-label">{t('form.hitboxDiameter')}</label>
-                <input
-                  type="number"
-                  className="field-input"
+                <SliderNumberRow
+                  label="D"
+                  title={t('form.hitboxDiameter')}
                   value={hbDiameter}
-                  step={0.05}
+                  step={0.01}
+                  span={0.5}
                   min={0.05}
-                  onChange={(e) => setHbDiameter(parseFloat(e.target.value) || 0.5)}
+                  max={10}
+                  fallback={defaultSize.hitboxDiameter}
+                  onChange={setHbDiameter}
                 />
               </div>
             ) : (
-              <div className="row3">
-                <div className="field-group">
-                  <label className="field-label">{t('form.width')}</label>
-                  <input
-                    type="number"
-                    className="field-input"
-                    value={hbWidth}
-                    step={0.05}
+              <div className="field-group">
+                {([
+                  { label: 'W', title: t('form.width'), value: hbWidth, set: setHbWidth },
+                  { label: 'H', title: t('form.height'), value: hbHeight, set: setHbHeight },
+                  { label: 'D', title: t('form.depth'), value: hbDepth, set: setHbDepth },
+                ]).map(({ label: sizeLabel, title, value, set }) => (
+                  <SliderNumberRow
+                    key={`hitbox-size-${title}`}
+                    label={sizeLabel}
+                    title={title}
+                    value={value}
+                    step={0.01}
+                    span={0.5}
                     min={0.05}
-                    onChange={(e) => setHbWidth(parseFloat(e.target.value) || 0.5)}
+                    max={10}
+                    fallback={defaultSize.hitboxBox}
+                    onChange={set}
                   />
-                </div>
-                <div className="field-group">
-                  <label className="field-label">{t('form.height')}</label>
-                  <input
-                    type="number"
-                    className="field-input"
-                    value={hbHeight}
-                    step={0.05}
-                    min={0.05}
-                    onChange={(e) => setHbHeight(parseFloat(e.target.value) || 0.5)}
-                  />
-                </div>
-                <div className="field-group">
-                  <label className="field-label">{t('form.depth')}</label>
-                  <input
-                    type="number"
-                    className="field-input"
-                    value={hbDepth}
-                    step={0.05}
-                    min={0.05}
-                    onChange={(e) => setHbDepth(parseFloat(e.target.value) || 0.5)}
-                  />
-                </div>
+                ))}
               </div>
             )}
 
@@ -898,17 +850,22 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
               );
             })}
 
-            <VectorFields
-              label={t('form.visualRotation')}
+            <VectorSliderFields
+              label={t('form.orientation')}
               value={hbRotation}
-              step={5}
+              step={0.5}
+              span={45}
+              min={-180}
+              max={180}
               onChange={setHbRotation}
             />
-            <VectorFields
+            <VectorSliderFields
               label={t('form.visualScale')}
               value={hbScale}
               min={0.001}
-              step={0.1}
+              max={20}
+              step={0.01}
+              span={0.5}
               onChange={setHbScale}
             />
           </>

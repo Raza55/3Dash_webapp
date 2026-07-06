@@ -5,6 +5,7 @@ import { fineSliderRange } from '../utils/editorControls';
 import { FormPanel, AccordionSection } from './FormPanel';
 import EntityPicker, { type HAEntityOption } from './EntityPicker';
 import { useTranslation } from '../contexts/LanguageContext';
+import { SliderNumberRow } from './EditorSliderControls';
 
 export interface BlindPreviewInfo {
   size: { width: number; height: number; depth: number };
@@ -166,61 +167,45 @@ const BlindForm = forwardRef<BlindFormHandle, Props>(function BlindForm({
         </div>
       </AccordionSection>
 
-      <AccordionSection title={t('form.shape')} defaultOpen>
-        <div className="row3">
-          <div className="field-group">
-            <label className="field-label">{t('form.width')}</label>
-            <input
-              type="number"
-              className="field-input"
-              step={0.05}
-              min={0.05}
-              value={width}
-              onChange={(e) => setWidth(parseFloat(e.target.value) || 0.05)}
-            />
-          </div>
-          <div className="field-group">
-            <label className="field-label">{t('form.height')}</label>
-            <input
-              type="number"
-              className="field-input"
-              step={0.05}
-              min={0.05}
-              value={height}
-              onChange={(e) => setHeight(parseFloat(e.target.value) || 0.05)}
-            />
-          </div>
-          <div className="field-group">
-            <label className="field-label">{t('form.depth')}</label>
-            <input
-              type="number"
-              className="field-input"
-              step={0.01}
-              min={0.01}
-              value={depth}
-              onChange={(e) => setDepth(parseFloat(e.target.value) || 0.01)}
-            />
-          </div>
-        </div>
+      <AccordionSection title={t('form.size')} defaultOpen>
+        {([
+          { label: 'W', title: t('form.width'), value: width, set: setWidth, span: 0.6, min: 0.05, fallback: defaultSize.width },
+          { label: 'H', title: t('form.height'), value: height, set: setHeight, span: 0.6, min: 0.05, fallback: defaultSize.height },
+          { label: 'D', title: t('form.depth'), value: depth, set: setDepth, span: 0.08, min: 0.01, fallback: defaultSize.depth },
+        ]).map(({ label: sizeLabel, title, value, set, span, min, fallback }) => (
+          <SliderNumberRow
+            key={title}
+            label={sizeLabel}
+            title={title}
+            value={value}
+            step={min === 0.01 ? 0.005 : 0.01}
+            span={span}
+            min={min}
+            max={10}
+            fallback={fallback}
+            onChange={set}
+          />
+        ))}
+      </AccordionSection>
 
+      <AccordionSection title={t('form.orientation')}>
         <div className="field-group">
           <label className="field-label">{t('form.rotation', { value: rotationY })}</label>
-          {(() => {
-            const range = fineSliderRange(rotationY, 45, -180, 180);
-            return (
-          <input
-            type="range"
-            className="pos-slider"
-            min={range.min}
-            max={range.max}
-            step={0.5}
+          <SliderNumberRow
+            label="Y"
+            title={t('form.rotation', { value: rotationY })}
             value={rotationY}
-            onChange={(e) => setRotationY(parseFloat(e.target.value))}
+            step={0.5}
+            span={45}
+            min={-180}
+            max={180}
+            fallback={0}
+            onChange={setRotationY}
           />
-            );
-          })()}
         </div>
+      </AccordionSection>
 
+      <AccordionSection title={t('form.shape')}>
         <div className="field-group">
           <label className="field-label">{t('form.slats', { value: slats })}</label>
           <input

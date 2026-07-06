@@ -207,63 +207,69 @@ export default function TubeForm({
 
       <AccordionSection title={t('form.tubeSettings')}>
         {([
-          { label: t('form.diameter'), value: diameter, set: setDiameter, min: 0.01, max: 0.5, step: 0.01 },
-          { label: t('form.gap'), value: gap, set: setGap, min: 0.05, max: 2, step: 0.05 },
-          { label: t('form.fontSize'), value: fontSize, set: setFontSize, min: 12, max: 120, step: 2 },
-        ] as const).map(({ label: lbl, value, set, min, max, step }) => (
-          <div key={lbl} className="tube-slider-group">
-            <span className="tube-slider-label">{lbl}</span>
-            <div className="tube-slider-row">
-              <input
-                type="range"
-                className="pos-slider"
-                min={min}
-                max={max}
-                step={step}
-                value={value}
-                onChange={(e) => set(parseFloat(e.target.value))}
-              />
-              <input
-                type="number"
-                className="pos-num"
-                step={step}
-                min={min}
-                value={value}
-                onChange={(e) => set(parseFloat(e.target.value) || min)}
-              />
+          { label: t('form.diameter'), value: diameter, set: setDiameter, min: 0.01, max: 0.5, step: 0.005, span: 0.06 },
+          { label: t('form.gap'), value: gap, set: setGap, min: 0.05, max: 2, step: 0.01, span: 0.2 },
+          { label: t('form.fontSize'), value: fontSize, set: setFontSize, min: 12, max: 120, step: 1, span: 14 },
+        ] as const).map(({ label: lbl, value, set, min, max, step, span }) => {
+          const range = fineSliderRange(value, span, min, max);
+          return (
+            <div key={lbl} className="tube-slider-group">
+              <span className="tube-slider-label">{lbl}</span>
+              <div className="tube-slider-row">
+                <input
+                  type="range"
+                  className="pos-slider"
+                  min={range.min}
+                  max={range.max}
+                  step={step}
+                  value={value}
+                  onChange={(e) => set(parseFloat(e.target.value))}
+                />
+                <input
+                  type="number"
+                  className="pos-num"
+                  step={step}
+                  min={min}
+                  value={value}
+                  onChange={(e) => set(parseFloat(e.target.value) || min)}
+                />
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </AccordionSection>
 
       <AccordionSection title={t('form.labelPositioning')}>
         {([
-          { label: t('form.position'), value: labelPosition, set: setLabelPosition, min: 0, max: 1, step: 0.01 },
-          { label: t('form.height'), value: labelHeight, set: setLabelHeight, min: 0, max: 3, step: 0.05 },
-        ] as const).map(({ label: lbl, value, set, min, max, step }) => (
-          <div key={lbl} className="tube-slider-group">
-            <span className="tube-slider-label">{lbl}</span>
-            <div className="tube-slider-row">
-              <input
-                type="range"
-                className="pos-slider"
-                min={min}
-                max={max}
-                step={step}
-                value={value}
-                onChange={(e) => set(parseFloat(e.target.value))}
-              />
-              <input
-                type="number"
-                className="pos-num"
-                step={step}
-                min={min}
-                value={value}
-                onChange={(e) => set(parseFloat(e.target.value) || 0)}
-              />
+          { label: t('form.position'), value: labelPosition, set: setLabelPosition, min: 0, max: 1, step: 0.01, span: 0.25 },
+          { label: t('form.height'), value: labelHeight, set: setLabelHeight, min: 0, max: 3, step: 0.01, span: 0.3 },
+        ] as const).map(({ label: lbl, value, set, min, max, step, span }) => {
+          const range = fineSliderRange(value, span, min, max);
+          return (
+            <div key={lbl} className="tube-slider-group">
+              <span className="tube-slider-label">{lbl}</span>
+              <div className="tube-slider-row">
+                <input
+                  type="range"
+                  className="pos-slider"
+                  min={range.min}
+                  max={range.max}
+                  step={step}
+                  value={value}
+                  onChange={(e) => set(parseFloat(e.target.value))}
+                />
+                <input
+                  type="number"
+                  className="pos-num"
+                  step={step}
+                  min={min}
+                  value={value}
+                  onChange={(e) => set(parseFloat(e.target.value) || 0)}
+                />
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </AccordionSection>
 
       <AccordionSection title={t('form.endpointPosition')} defaultOpen>
