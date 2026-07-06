@@ -68,6 +68,7 @@ interface VectorSliderFieldsProps {
   max?: number;
   axisLabels?: Partial<Record<keyof LightPosition, string>>;
   axisColors?: Partial<Record<keyof LightPosition, string>>;
+  hideLabel?: boolean;
 }
 
 export function VectorSliderFields({
@@ -80,6 +81,7 @@ export function VectorSliderFields({
   max,
   axisLabels,
   axisColors,
+  hideLabel = false,
 }: VectorSliderFieldsProps) {
   const update = (axis: keyof LightPosition, next: number) => {
     onChange({ ...value, [axis]: next });
@@ -87,7 +89,7 @@ export function VectorSliderFields({
 
   return (
     <div className="field-group">
-      <label className="field-label">{label}</label>
+      {!hideLabel && <label className="field-label">{label}</label>}
       {(['x', 'y', 'z'] as const).map((axis) => (
         <SliderNumberRow
           key={axis}

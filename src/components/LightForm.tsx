@@ -723,27 +723,39 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
               </div>
             )}
 
-            <VectorSliderFields
-              label={t('form.orientation')}
-              value={rotation}
-              step={0.5}
-              span={45}
-              min={-180}
-              max={180}
-              onChange={setRotation}
-            />
-            <VectorSliderFields
-              label={t('form.visualScale')}
-              value={scale}
-              min={0.001}
-              max={20}
-              step={0.01}
-              span={0.5}
-              onChange={setScale}
-            />
           </>
         )}
       </AccordionSection>
+
+      {!multiPart && (
+        <AccordionSection title={t('form.orientation')}>
+          <VectorSliderFields
+            label={t('form.orientation')}
+            value={rotation}
+            step={0.5}
+            span={45}
+            min={-180}
+            max={180}
+            hideLabel
+            onChange={setRotation}
+          />
+        </AccordionSection>
+      )}
+
+      {!multiPart && (
+        <AccordionSection title={t('form.visualScale')}>
+          <VectorSliderFields
+            label={t('form.visualScale')}
+            value={scale}
+            min={0.001}
+            max={20}
+            step={0.01}
+            span={0.5}
+            hideLabel
+            onChange={setScale}
+          />
+        </AccordionSection>
+      )}
 
       <AccordionSection title={t('form.hitbox')}>
         {!multiPart && (
