@@ -7,7 +7,7 @@ import {
   PointLight,
   ShadowGenerator,
   Quaternion,
-  type Mesh,
+  Mesh,
   type AbstractMesh,
   type Node,
 } from '@babylonjs/core';
@@ -54,6 +54,18 @@ export interface CreateLightMeshOptions {
 
 /** Minimum ratio between longest and shortest cube dimension to be treated as a strip. */
 const STRIP_RATIO = 3;
+const NANOLEAF_PANEL_COORDS: Array<[number, number]> = [
+  [0, 0],
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, -1],
+  [-1, 1],
+  [2, -1],
+  [-2, 1],
+  [1, 1],
+];
 
 /**
  * Create a light mesh (sphere, ellipsoid, or cube) with optional PointLight(s) and shadow generator.
@@ -237,6 +249,10 @@ function createShapeMesh(
   size: LightSize,
   fallback: { sphere: number; box: number } = { sphere: 0.25, box: 0.3 },
 ): Mesh {
+  if (shape === 'nanoleafShapes') {
+    return createNanoleafShapesMesh(scene, name, size, fallback);
+  }
+
   if (shape === 'cube') {
     return MeshBuilder.CreateBox(name, {
       width: size.width ?? fallback.box,
@@ -257,6 +273,59 @@ function createShapeMesh(
 
   return MeshBuilder.CreateSphere(name, {
     diameter: size.diameter ?? fallback.sphere,
+  }, scene);
+}
+
+function createNanoleafShapesMesh(
+  scene: Scene,
+  name: string,
+  size: LightSize,
+  fallback: { sphere: number; box: number },
+): Mesh {
+  const targetWidth = size.width ?? Math.max(1.15, fallback.box * 4);
+  const targetHeight = size.height ?? Math.max(0.78, fallback.box * 2.6);
+  const targetDepth = size.depth ?? 0.035;
+  const rawRadius = 0.5;
+  const rawDx = rawRadius * 1.58;
+  const rawDy = rawRadius * 1.36;
+
+  const rawPositions = NANOLEAF_PANEL_COORDS.map(([q, r]) => ({
+    x: q * rawDx,
+    y: (r + q * 0.5) * rawDy,
+  }));
+  const minX = Math.min(...rawPositions.map((p) => p.x - rawRadius));
+  const maxX = Math.max(...rawPositions.map((p) => p.x + rawRadius));
+  const minY = Math.min(...rawPositions.map((p) => p.y - rawRadius));
+  const maxY = Math.max(...rawPositions.map((p) => p.y + rawRadius));
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const panelScale = Math.min(
+    targetWidth / Math.max(0.001, maxX - minX),
+    targetHeight / Math.max(0.001, maxY - minY),
+  );
+
+  const panels = rawPositions.map((p, index) => {
+    const panel = MeshBuilder.CreateCylinder(`${name}_panel_${index}`, {
+      height: targetDepth,
+      diameter: rawRadius * panelScale * 1.88,
+      tessellation: 6,
+    }, scene);
+    panel.rotation.x = Math.PI / 2;
+    panel.position.set((p.x - centerX) * panelScale, (p.y - centerY) * panelScale, 0);
+    panel.bakeCurrentTransformIntoVertices();
+    return panel;
+  });
+
+  const merged = Mesh.MergeMeshes(panels, true, true, undefined, false, true);
+  if (merged) {
+    merged.name = name;
+    return merged;
+  }
+
+  return MeshBuilder.CreateBox(name, {
+    width: targetWidth,
+    height: targetHeight,
+    depth: targetDepth,
   }, scene);
 }
 

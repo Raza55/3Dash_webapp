@@ -19,6 +19,7 @@ interface PartState {
 
 const ZERO_ROTATION: LightPosition = { x: 0, y: 0, z: 0 };
 const UNIT_SCALE: LightPosition = { x: 1, y: 1, z: 1 };
+const NANOLEAF_DEFAULT_SIZE = { width: 1.15, height: 0.78, depth: 0.035 };
 
 function cloneVector(v: LightPosition | undefined, fallback: LightPosition): LightPosition {
   return { x: v?.x ?? fallback.x, y: v?.y ?? fallback.y, z: v?.z ?? fallback.z };
@@ -397,6 +398,30 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
     setParts(prev => prev.filter((_, i) => i !== idx));
   }, []);
 
+  const applyNanoleafDefaults = useCallback(() => {
+    setShape('nanoleafShapes');
+    setWidth(NANOLEAF_DEFAULT_SIZE.width);
+    setHeight(NANOLEAF_DEFAULT_SIZE.height);
+    setDepth(NANOLEAF_DEFAULT_SIZE.depth);
+    setBrightness((prev) => Math.max(prev, 1.2));
+  }, []);
+
+  const handleTypeChange = useCallback((nextType: LightType) => {
+    setType(nextType);
+    if (nextType === 'nanoleafShapes') {
+      applyNanoleafDefaults();
+    }
+  }, [applyNanoleafDefaults]);
+
+  const handleShapeChange = useCallback((nextShape: LightShape) => {
+    setShape(nextShape);
+    if (nextShape === 'nanoleafShapes') {
+      setWidth(NANOLEAF_DEFAULT_SIZE.width);
+      setHeight(NANOLEAF_DEFAULT_SIZE.height);
+      setDepth(NANOLEAF_DEFAULT_SIZE.depth);
+    }
+  }, []);
+
   const footer = (
     <>
       <button
@@ -448,13 +473,14 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
           <select
             className="field-select"
             value={type}
-            onChange={(e) => setType(e.target.value as LightType)}
+            onChange={(e) => handleTypeChange(e.target.value as LightType)}
           >
             <option value="toggle">{t('form.toggleType')}</option>
             <option value="dimmeable">{t('form.dimmedType')}</option>
             <option value="warmCold">{t('form.warmColdType')}</option>
             <option value="rgb">RGB</option>
             <option value="rgbw">RGBW</option>
+            <option value="nanoleafShapes">{t('form.nanoleafShapesType')}</option>
             <option value="remote">{t('form.remoteType')}</option>
           </select>
         </div>
@@ -558,11 +584,17 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
                   <select
                     className="field-select"
                     value={part.shape}
-                    onChange={(e) => updatePart(idx, { shape: e.target.value as LightShape })}
+                    onChange={(e) => {
+                      const nextShape = e.target.value as LightShape;
+                      updatePart(idx, nextShape === 'nanoleafShapes'
+                        ? { shape: nextShape, ...NANOLEAF_DEFAULT_SIZE }
+                        : { shape: nextShape });
+                    }}
                   >
                     <option value="sphere">{t('form.sphere')}</option>
                     <option value="cube">{t('form.cube')}</option>
                     <option value="ellipsoid">{t('form.ellipsoid')}</option>
+                    <option value="nanoleafShapes">{t('form.nanoleafShapes')}</option>
                   </select>
                 </div>
 
@@ -656,11 +688,12 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
               <select
                 className="field-select"
                 value={shape}
-                onChange={(e) => setShape(e.target.value as LightShape)}
+                onChange={(e) => handleShapeChange(e.target.value as LightShape)}
               >
                 <option value="sphere">{t('form.sphere')}</option>
                 <option value="cube">{t('form.cube')}</option>
                 <option value="ellipsoid">{t('form.ellipsoid')}</option>
+                <option value="nanoleafShapes">{t('form.nanoleafShapes')}</option>
               </select>
             </div>
 
@@ -765,6 +798,7 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
                 <option value="sphere">{t('form.sphere')}</option>
                 <option value="cube">{t('form.cube')}</option>
                 <option value="ellipsoid">{t('form.ellipsoid')}</option>
+                <option value="nanoleafShapes">{t('form.nanoleafShapes')}</option>
               </select>
             </div>
 

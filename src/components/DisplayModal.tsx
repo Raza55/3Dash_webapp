@@ -62,6 +62,7 @@ interface Props {
   onMediaStop: (entityId: string) => void;
   onMediaSetVolume: (entityId: string, volume: number) => void;
   onMediaSelectSource: (entityId: string, source: string) => void;
+  onToggle: (entityId: string) => void;
 }
 
 /** Graph section for a single sensor source. */
@@ -324,10 +325,30 @@ function ClimateGauge({ entityId, climateState, onSetTemperature, onSetHvacMode 
   );
 }
 
-function getTvSource(display: DisplayConfig): string | null {
-  return display.sources.find((src) => src.entityId.startsWith('media_player.'))?.entityId
-    ?? display.sources[0]?.entityId
-    ?? null;
+function isScreenKind(display: DisplayConfig): boolean {
+  return !!display.kind && display.kind !== 'info';
+}
+
+function getScreenSource(display: DisplayConfig): string | null {
+  if (display.kind === 'tv' || display.kind === 'console') {
+    return display.sources.find((src) => src.entityId.startsWith('media_player.'))?.entityId
+      ?? display.sources[0]?.entityId
+      ?? null;
+  }
+  return display.sources[0]?.entityId ?? null;
+}
+
+function screenKindLabelKey(kind: DisplayConfig['kind']): string {
+  if (kind === 'tv') return 'form.tvDisplay';
+  if (kind === 'pc') return 'form.pcDisplay';
+  if (kind === 'console') return 'form.consoleDisplay';
+  if (kind === 'qnap') return 'form.qnapDisplay';
+  return 'form.infoDisplay';
+}
+
+function canToggleDomain(entityId: string): boolean {
+  const domain = entityId.split('.')[0];
+  return ['switch', 'input_boolean', 'light', 'fan'].includes(domain);
 }
 
 function TVControls({
@@ -414,6 +435,44 @@ function TVControls({
   );
 }
 
+function ScreenStatusControls({
+  display,
+  entityId,
+  state,
+  onToggle,
+}: {
+  display: DisplayConfig;
+  entityId: string;
+  state: HAState | undefined;
+  onToggle: (entityId: string) => void;
+}) {
+  const t = useTranslation();
+  const attrs = state?.attributes ?? {};
+  const currentState = state?.state ?? 'unknown';
+  const isOff = currentState === 'off' || currentState === 'unavailable' || currentState === 'unknown';
+  const title = String(attrs.friendly_name ?? display.label ?? entityId).trim();
+  const secondary = [entityId, t(screenKindLabelKey(display.kind))].filter(Boolean).join(' | ');
+  const toggleable = canToggleDomain(entityId);
+
+  return (
+    <div className="im-section tv-control">
+      <div className={`tv-screen-preview${isOff ? ' off' : ' on'}`}>
+        <div className="tv-screen-state">{currentState.toUpperCase()}</div>
+        <div className="tv-screen-title">{title}</div>
+        <div className="tv-screen-subtitle">{secondary}</div>
+      </div>
+
+      {toggleable && (
+        <div className="tv-control-grid">
+          <button className="im-period-btn" onClick={() => onToggle(entityId)}>
+            {isOff ? t('modal.turnOn') : t('modal.turnOff')}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DisplayModal({
   display,
   states,
@@ -427,10 +486,13 @@ export default function DisplayModal({
   onMediaStop,
   onMediaSetVolume,
   onMediaSelectSource,
+  onToggle,
 }: Props) {
   if (!display) return null;
 
-  const tvEntityId = display.kind === 'tv' ? getTvSource(display) : null;
+  const screenEntityId = isScreenKind(display) ? getScreenSource(display) : null;
+  const screenDomain = screenEntityId?.split('.')[0];
+  const mediaEntityId = screenEntityId && screenDomain === 'media_player' ? screenEntityId : null;
 
   // Determine which sections to show per source
   const sections = display.sources.map((src) => {
@@ -457,8 +519,8 @@ export default function DisplayModal({
             <div>
               <div className="im-name">{display.label}</div>
               <div className="im-value-inline">
-                {tvEntityId
-                  ? `${states[tvEntityId]?.state ?? '--'}${states[tvEntityId]?.attributes?.source ? ` | ${String(states[tvEntityId].attributes.source)}` : ''}`
+                {screenEntityId
+                  ? `${states[screenEntityId]?.state ?? '--'}${states[screenEntityId]?.attributes?.source ? ` | ${String(states[screenEntityId].attributes.source)}` : ''}`
                   : display.sources.map((src) => {
                     const ha = states[src.entityId];
                     const val = ha?.state ?? '--';
@@ -473,10 +535,10 @@ export default function DisplayModal({
         </div>
 
         <div className="im-body">
-          {tvEntityId && (
+          {mediaEntityId && (
             <TVControls
-              entityId={tvEntityId}
-              state={states[tvEntityId]}
+              entityId={mediaEntityId}
+              state={states[mediaEntityId]}
               onTurnOn={onMediaTurnOn}
               onTurnOff={onMediaTurnOff}
               onPlayPause={onMediaPlayPause}
@@ -486,7 +548,16 @@ export default function DisplayModal({
             />
           )}
 
-          {!tvEntityId && (
+          {screenEntityId && !mediaEntityId && (
+            <ScreenStatusControls
+              display={display}
+              entityId={screenEntityId}
+              state={states[screenEntityId]}
+              onToggle={onToggle}
+            />
+          )}
+
+          {!screenEntityId && (
             <>
           {/* Sensor graphs */}
           {sensorSources.map(({ src }) => (

@@ -2030,6 +2030,7 @@ export default function Dashboard() {
           onMediaStop={handleMediaStop}
           onMediaSetVolume={handleMediaSetVolume}
           onMediaSelectSource={handleMediaSelectSource}
+          onToggle={handleToggle}
         />
 
         <SettingsModal

@@ -11,7 +11,7 @@ import {
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { icons } from 'lucide-react';
-import type { DisplayAnimation, DisplayConfig, HAState } from '../types';
+import type { DisplayAnimation, DisplayConfig, DisplayKind, HAState } from '../types';
 import type { Observer } from '@babylonjs/core';
 
 export interface DisplayMeshEntry {
@@ -43,6 +43,37 @@ const H_PADDING = 0.6; // extra width factor (chars are ~0.6× their height)
 const TV_TEXTURE_SIZE = { width: 1024, height: 576 };
 const TV_SCENE_SIZE = { width: 1.9, height: 1.07 };
 
+interface ScreenTheme {
+  mark: string;
+  accent: string;
+  activeStart: string;
+  activeEnd: string;
+}
+
+function isScreenKind(kind: DisplayKind | undefined): boolean {
+  return !!kind && kind !== 'info';
+}
+
+function getScreenTheme(kind: DisplayKind | undefined): ScreenTheme {
+  if (kind === 'pc') {
+    return { mark: 'PC', accent: '#60a5fa', activeStart: '#0f2747', activeEnd: '#1e3a8a' };
+  }
+  if (kind === 'console') {
+    return { mark: 'GAME', accent: '#a78bfa', activeStart: '#22103d', activeEnd: '#581c87' };
+  }
+  if (kind === 'qnap') {
+    return { mark: 'NAS', accent: '#34d399', activeStart: '#052e25', activeEnd: '#065f46' };
+  }
+  return { mark: 'TV', accent: '#38bdf8', activeStart: '#0f2747', activeEnd: '#164e63' };
+}
+
+function getScreenSource(cfg: DisplayConfig) {
+  if (cfg.kind === 'tv' || cfg.kind === 'console') {
+    return cfg.sources.find((src) => src.entityId.startsWith('media_player.')) ?? cfg.sources[0];
+  }
+  return cfg.sources[0];
+}
+
 /**
  * Measure the texture size in pixels needed to fit all sources,
  * using an offscreen canvas for accurate text measurement.
@@ -51,7 +82,7 @@ function measureTextureSize(
   cfg: DisplayConfig,
   mockTexts: string[],
 ): { texW: number; texH: number; sceneW: number; sceneH: number } {
-  if (cfg.kind === 'tv') {
+  if (isScreenKind(cfg.kind)) {
     return {
       texW: TV_TEXTURE_SIZE.width,
       texH: TV_TEXTURE_SIZE.height,
@@ -212,8 +243,8 @@ export function updateDisplayTexture(
   states: Record<string, HAState>,
 ): void {
   const cfg = entry.config;
-  if (cfg.kind === 'tv') {
-    updateTvDisplayTexture(entry, states);
+  if (isScreenKind(cfg.kind)) {
+    updateScreenDisplayTexture(entry, states);
     return;
   }
 
@@ -396,23 +427,32 @@ export function updateDisplayTexture(
   entry.texture.update();
 }
 
-function updateTvDisplayTexture(entry: DisplayMeshEntry, states: Record<string, HAState>): void {
+function updateScreenDisplayTexture(entry: DisplayMeshEntry, states: Record<string, HAState>): void {
   const cfg = entry.config;
-  const source = cfg.sources.find((src) => src.entityId.startsWith('media_player.')) ?? cfg.sources[0];
+  const source = getScreenSource(cfg);
   const ha = source ? states[source.entityId] : undefined;
   const state = ha?.state ?? 'unknown';
   const attrs = ha?.attributes ?? {};
+  const theme = getScreenTheme(cfg.kind);
   const isActive = !['off', 'unavailable', 'unknown'].includes(state);
   const isPlaying = state === 'playing' || state === 'buffering';
   const app = String(attrs.app_name ?? attrs.source ?? attrs.media_channel ?? '').trim();
-  const title = String(attrs.media_title ?? attrs.media_series_title ?? (isActive ? cfg.label : 'OFF')).trim();
+  const friendly = String(attrs.friendly_name ?? '').trim();
+  const rawTitle = String(attrs.media_title ?? attrs.media_series_title ?? friendly ?? '').trim();
+  const title = rawTitle || (isActive ? cfg.label : 'OFF');
   const artist = String(attrs.media_artist ?? attrs.media_album_name ?? '').trim();
   const volume = typeof attrs.volume_level === 'number' ? attrs.volume_level : undefined;
+  const statusLine = isActive
+    ? [app, artist, source?.label].filter(Boolean).join('  |  ') || source?.entityId || state.toUpperCase()
+    : cfg.label;
   const cacheKey = [
+    cfg.kind ?? 'screen',
     state,
     app,
     title,
     artist,
+    source?.entityId ?? '',
+    source?.label ?? '',
     volume?.toFixed(2) ?? '',
     attrs.is_volume_muted ? 'muted' : '',
   ].join('|');
@@ -426,9 +466,9 @@ function updateTvDisplayTexture(entry: DisplayMeshEntry, states: Record<string, 
 
   const bg = ctx.createLinearGradient(0, 0, texW, texH);
   if (isActive) {
-    bg.addColorStop(0, isPlaying ? '#0f2747' : '#111827');
+    bg.addColorStop(0, isPlaying ? theme.activeStart : '#111827');
     bg.addColorStop(0.55, '#05070b');
-    bg.addColorStop(1, isPlaying ? '#164e63' : '#111827');
+    bg.addColorStop(1, isPlaying ? theme.activeEnd : '#111827');
   } else {
     bg.addColorStop(0, '#020305');
     bg.addColorStop(1, '#09090b');
@@ -438,8 +478,8 @@ function updateTvDisplayTexture(entry: DisplayMeshEntry, states: Record<string, 
 
   if (isActive) {
     const glow = ctx.createRadialGradient(texW * 0.5, texH * 0.5, 20, texW * 0.5, texH * 0.5, texW * 0.6);
-    glow.addColorStop(0, 'rgba(56, 189, 248, 0.22)');
-    glow.addColorStop(1, 'rgba(56, 189, 248, 0)');
+    glow.addColorStop(0, `${theme.accent}38`);
+    glow.addColorStop(1, `${theme.accent}00`);
     ctx.fillStyle = glow;
     ctx.fillRect(0, 0, texW, texH);
   }
@@ -454,16 +494,19 @@ function updateTvDisplayTexture(entry: DisplayMeshEntry, states: Record<string, 
   ctx.fillText(isActive ? title.slice(0, 32) : 'OFF', texW / 2, texH * 0.46);
 
   ctx.shadowBlur = 0;
-  ctx.fillStyle = isActive ? '#7dd3fc' : '#475569';
+  ctx.fillStyle = isActive ? theme.accent : '#475569';
   ctx.font = '500 25px "DM Mono", monospace';
-  const line2 = isActive
-    ? [app, artist].filter(Boolean).join('  |  ') || state.toUpperCase()
-    : cfg.label;
-  ctx.fillText(line2.slice(0, 54), texW / 2, texH * 0.58);
+  ctx.fillText(statusLine.slice(0, 54), texW / 2, texH * 0.58);
 
-  ctx.fillStyle = isPlaying ? '#22c55e' : isActive ? '#38bdf8' : '#1f2937';
+  ctx.fillStyle = isPlaying ? '#22c55e' : isActive ? theme.accent : '#1f2937';
   ctx.font = '600 20px "DM Mono", monospace';
   ctx.fillText(state.toUpperCase(), texW / 2, texH * 0.22);
+
+  ctx.fillStyle = isActive ? `${theme.accent}cc` : '#334155';
+  ctx.font = '700 22px "DM Mono", monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(theme.mark, 36, 44);
+  ctx.textAlign = 'center';
 
   if (volume !== undefined) {
     const barW = texW * 0.36;
@@ -472,13 +515,13 @@ function updateTvDisplayTexture(entry: DisplayMeshEntry, states: Record<string, 
     const y = texH * 0.75;
     ctx.fillStyle = 'rgba(148, 163, 184, 0.22)';
     ctx.fillRect(x, y, barW, barH);
-    ctx.fillStyle = attrs.is_volume_muted ? '#64748b' : '#38bdf8';
+    ctx.fillStyle = attrs.is_volume_muted ? '#64748b' : theme.accent;
     ctx.fillRect(x, y, barW * Math.max(0, Math.min(1, volume)), barH);
   }
 
   entry.material.alpha = cfg.opacity ?? 0.98;
   entry.material.emissiveColor = isActive
-    ? new BABYLON_Color3(0.35, 0.55, 0.75)
+    ? BABYLON_Color3.FromHexString(theme.accent).scale(0.65)
     : new BABYLON_Color3(0.02, 0.02, 0.025);
   entry.material.diffuseColor = isActive
     ? new BABYLON_Color3(0.7, 0.8, 0.9)
@@ -555,6 +598,9 @@ export function buildMockupStates(configs: DisplayConfig[]): Record<string, HASt
           if (lower.includes(key)) { value = val; break; }
         }
       }
+      if (isScreenKind(cfg.kind) && domain !== 'media_player') {
+        value = cfg.kind === 'qnap' ? 'online' : 'on';
+      }
       const attributes = domain === 'media_player'
         ? {
             app_name: 'Netflix',
@@ -564,7 +610,9 @@ export function buildMockupStates(configs: DisplayConfig[]): Record<string, HASt
             source_list: ['HDMI 1', 'Netflix', 'YouTube'],
             volume_level: 0.36,
           }
-        : {};
+        : isScreenKind(cfg.kind)
+          ? { friendly_name: cfg.label }
+          : {};
       states[src.entityId] = { entity_id: src.entityId, state: value, attributes };
     }
   }

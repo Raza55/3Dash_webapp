@@ -26,12 +26,14 @@ const TYPE_ICONS: Record<string, string> = {
   warmCold: '\u{1F321}',
   rgb: '\u{1F308}',
   rgbw: '\u2728',
+  nanoleafShapes: '\u2B22',
 };
 
 const SHAPE_ICONS: Record<string, string> = {
   sphere: '\u25CF',
   cube: '\u25A0',
   ellipsoid: '\u2B2D',
+  nanoleafShapes: '\u2B22',
 };
 
 interface Props {

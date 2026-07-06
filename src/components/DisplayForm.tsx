@@ -90,6 +90,43 @@ const DEFAULT_TV_SOURCE: DisplaySource = {
   fontSize: 42,
   fontWeight: 'bold',
 };
+const SCREEN_KINDS: DisplayKind[] = ['tv', 'pc', 'console', 'qnap'];
+const DISPLAY_KIND_OPTIONS: DisplayKind[] = ['info', ...SCREEN_KINDS];
+
+function isScreenKind(kind: DisplayKind): boolean {
+  return kind !== 'info';
+}
+
+function displayKindLabelKey(kind: DisplayKind): string {
+  if (kind === 'tv') return 'form.tvDisplay';
+  if (kind === 'pc') return 'form.pcDisplay';
+  if (kind === 'console') return 'form.consoleDisplay';
+  if (kind === 'qnap') return 'form.qnapDisplay';
+  return 'form.infoDisplay';
+}
+
+function defaultScreenLabel(kind: DisplayKind): string {
+  if (kind === 'tv') return 'TV';
+  if (kind === 'pc') return 'PC';
+  if (kind === 'console') return 'Console';
+  if (kind === 'qnap') return 'QNAP';
+  return 'Display';
+}
+
+function screenPlaceholder(kind: DisplayKind): string {
+  if (kind === 'tv') return 'media_player.living_room_tv';
+  if (kind === 'pc') return 'switch.gaming_pc';
+  if (kind === 'console') return 'media_player.playstation_5';
+  if (kind === 'qnap') return 'sensor.qnap_status';
+  return 'sensor.temperature';
+}
+
+function screenBackground(kind: DisplayKind): string {
+  if (kind === 'pc') return '#020617';
+  if (kind === 'console') return '#070312';
+  if (kind === 'qnap') return '#04130f';
+  return '#05070b';
+}
 
 const DisplayForm = forwardRef<DisplayFormHandle, Props>(function DisplayForm({
   open,
@@ -177,11 +214,11 @@ const DisplayForm = forwardRef<DisplayFormHandle, Props>(function DisplayForm({
 
   const handleKindChange = useCallback((kind: DisplayKind) => {
     setDisplayKind(kind);
-    if (kind === 'tv') {
+    if (isScreenKind(kind)) {
       setSources((prev) => [{ ...DEFAULT_TV_SOURCE, entityId: prev[0]?.entityId ?? '', label: prev[0]?.label ?? '' }]);
       setTextAlign('center');
       setBgEnabled(true);
-      setBackgroundColor('#05070b');
+      setBackgroundColor(screenBackground(kind));
       setClickable(true);
       setAnimation(undefined);
     } else {
@@ -215,7 +252,7 @@ const DisplayForm = forwardRef<DisplayFormHandle, Props>(function DisplayForm({
 
     onSave({
       id: editDisplay?.id || generateUUID(),
-      label: label.trim() || validSources[0].entityId.split('.').pop()?.replace(/_/g, ' ') || (displayKind === 'tv' ? 'TV' : 'Display'),
+      label: label.trim() || validSources[0].entityId.split('.').pop()?.replace(/_/g, ' ') || defaultScreenLabel(displayKind),
       kind: displayKind !== 'info' ? displayKind : undefined,
       sources: validSources,
       position,
@@ -224,11 +261,11 @@ const DisplayForm = forwardRef<DisplayFormHandle, Props>(function DisplayForm({
       height,
       textAlign: textAlign !== 'center' ? textAlign : undefined,
       opacity,
-      backgroundColor: displayKind === 'tv' ? '#05070b' : (bgEnabled ? backgroundColor : undefined),
+      backgroundColor: isScreenKind(displayKind) ? screenBackground(displayKind) : (bgEnabled ? backgroundColor : undefined),
       mirrorH: mirrorH || undefined,
       mirrorV: mirrorV || undefined,
-      clickable: displayKind === 'tv' ? true : (clickable || undefined),
-      animation: displayKind === 'tv' ? undefined : animation,
+      clickable: isScreenKind(displayKind) ? true : (clickable || undefined),
+      animation: isScreenKind(displayKind) ? undefined : animation,
     });
   }, [displayKind, label, sources, position, normal, width, height, textAlign, opacity, mirrorH, mirrorV, bgEnabled, backgroundColor, clickable, animation, editDisplay, onSave, t]);
 
@@ -266,8 +303,8 @@ const DisplayForm = forwardRef<DisplayFormHandle, Props>(function DisplayForm({
       <AccordionSection title={t('form.identity')} defaultOpen>
         <div className="field-group">
           <label className="field-label">{t('form.displayType')}</label>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-            {(['info', 'tv'] as DisplayKind[]).map((kind) => (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 4 }}>
+            {DISPLAY_KIND_OPTIONS.map((kind) => (
               <button
                 key={kind}
                 className="btn btn-ghost"
@@ -278,7 +315,7 @@ const DisplayForm = forwardRef<DisplayFormHandle, Props>(function DisplayForm({
                 }}
                 onClick={() => handleKindChange(kind)}
               >
-                {t(kind === 'tv' ? 'form.tvDisplay' : 'form.infoDisplay')}
+                {t(displayKindLabelKey(kind))}
               </button>
             ))}
           </div>
@@ -296,14 +333,14 @@ const DisplayForm = forwardRef<DisplayFormHandle, Props>(function DisplayForm({
       </AccordionSection>
 
       <AccordionSection title={t('form.dataSources')} defaultOpen>
-        {displayKind === 'tv' ? (
+        {isScreenKind(displayKind) ? (
           <div className="field-group">
-            <label className="field-label">{t('form.mediaPlayerEntityId')}</label>
+            <label className="field-label">{t(displayKind === 'tv' ? 'form.mediaPlayerEntityId' : 'form.screenEntityId')}</label>
             <EntityPicker
               value={sources[0]?.entityId ?? ''}
               onChange={(v) => setSources([{ ...(sources[0] ?? DEFAULT_TV_SOURCE), entityId: v }])}
               onSelect={(e) => { if (!label.trim() && e.friendly_name) setLabel(e.friendly_name); }}
-              placeholder="media_player.living_room_tv"
+              placeholder={screenPlaceholder(displayKind)}
               entities={haEntities}
               className="field-input"
             />

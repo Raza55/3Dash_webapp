@@ -95,6 +95,15 @@ function defaultLightAttributes(config: LightConfig): Record<string, unknown> {
       effect_list: ['none', 'colorloop'],
     };
   }
+  if (config.type === 'nanoleafShapes') {
+    return {
+      ...base,
+      supported_color_modes: ['hs', 'color_temp'],
+      min_color_temp_kelvin: 2000,
+      max_color_temp_kelvin: 6500,
+      effect_list: ['none', 'Color Burst', 'Northern Lights', 'Pop Rocks', 'Rhythm'],
+    };
+  }
   if (config.type === 'warmCold') {
     return {
       ...base,
@@ -353,7 +362,7 @@ export class DemoHAConnection {
       } else {
         const onAttrs = { ...attrs, brightness: attrs.brightness || 255 };
         const lt = this.lightTypes.get(entityId);
-        if (lt === 'rgb' || lt === 'rgbw') {
+        if (lt === 'rgb' || lt === 'rgbw' || lt === 'nanoleafShapes') {
           onAttrs.rgb_color = randomBlueToRed();
         }
         this.updateState(entityId, 'on', onAttrs);

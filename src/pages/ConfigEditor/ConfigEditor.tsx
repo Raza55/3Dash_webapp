@@ -18,8 +18,8 @@ import {
   RotationGizmo,
   ScaleGizmo,
   Space,
+  Mesh,
   type AbstractMesh,
-  type Mesh,
   type LinesMesh,
   type Observer,
   type Scene,
@@ -80,9 +80,59 @@ type ActiveGizmo = PositionGizmo | RotationGizmo | ScaleGizmo;
 type EditorTransformMode = ModelObjectEditMode;
 
 const TRANSFORM_MODES: EditorTransformMode[] = ['move', 'rotate', 'scale'];
+const NANOLEAF_PANEL_COORDS: Array<[number, number]> = [
+  [0, 0],
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, -1],
+  [-1, 1],
+  [2, -1],
+  [-2, 1],
+  [1, 1],
+];
 
 function roundValue(value: number, decimals = 3): number {
   return parseFloat(value.toFixed(decimals));
+}
+
+function createNanoleafPreviewMesh(scene: Scene, name: string, size: Record<string, number>): Mesh {
+  const targetWidth = size.width ?? 1.15;
+  const targetHeight = size.height ?? 0.78;
+  const targetDepth = size.depth ?? 0.035;
+  const rawRadius = 0.5;
+  const rawDx = rawRadius * 1.58;
+  const rawDy = rawRadius * 1.36;
+  const rawPositions = NANOLEAF_PANEL_COORDS.map(([q, r]) => ({
+    x: q * rawDx,
+    y: (r + q * 0.5) * rawDy,
+  }));
+  const minX = Math.min(...rawPositions.map((p) => p.x - rawRadius));
+  const maxX = Math.max(...rawPositions.map((p) => p.x + rawRadius));
+  const minY = Math.min(...rawPositions.map((p) => p.y - rawRadius));
+  const maxY = Math.max(...rawPositions.map((p) => p.y + rawRadius));
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const panelScale = Math.min(
+    targetWidth / Math.max(0.001, maxX - minX),
+    targetHeight / Math.max(0.001, maxY - minY),
+  );
+
+  const panels = rawPositions.map((p, index) => {
+    const panel = MeshBuilder.CreateCylinder(`${name}_panel_${index}`, {
+      height: targetDepth,
+      diameter: rawRadius * panelScale * 1.88,
+      tessellation: 6,
+    }, scene);
+    panel.rotation.x = Math.PI / 2;
+    panel.position.set((p.x - centerX) * panelScale, (p.y - centerY) * panelScale, 0);
+    panel.bakeCurrentTransformIntoVertices();
+    return panel;
+  });
+
+  return Mesh.MergeMeshes(panels, true, true, undefined, false, true)
+    ?? MeshBuilder.CreateBox(name, { width: targetWidth, height: targetHeight, depth: targetDepth }, scene);
 }
 
 function rotationFromMesh(mesh: AbstractMesh): LightPosition {
@@ -806,7 +856,9 @@ export default function ConfigEditor() {
 
       const createPreviewShape = (name: string, sh: string, sz: Record<string, number>, p: LightPosition, r?: LightPosition, s?: LightPosition): Mesh => {
         let m: Mesh;
-        if (sh === 'cube') {
+        if (sh === 'nanoleafShapes') {
+          m = createNanoleafPreviewMesh(scene, name, sz);
+        } else if (sh === 'cube') {
           m = MeshBuilder.CreateBox(name, {
             width: sz.width ?? 0.3,
             height: sz.height ?? 0.3,
@@ -850,7 +902,9 @@ export default function ConfigEditor() {
       // Create hitbox preview if custom hitbox is enabled
       if (hitboxInfo) {
         let hbMesh: Mesh;
-        if (hitboxInfo.shape === 'cube') {
+        if (hitboxInfo.shape === 'nanoleafShapes') {
+          hbMesh = createNanoleafPreviewMesh(scene, 'hitbox-preview', hitboxInfo.size);
+        } else if (hitboxInfo.shape === 'cube') {
           hbMesh = MeshBuilder.CreateBox('hitbox-preview', {
             width: hitboxInfo.size.width ?? 0.5,
             height: hitboxInfo.size.height ?? 0.5,

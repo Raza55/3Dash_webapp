@@ -11,8 +11,8 @@ export interface LightPosition {
   z: number;
 }
 
-export type LightType = 'toggle' | 'dimmeable' | 'warmCold' | 'rgb' | 'rgbw' | 'remote';
-export type LightShape = 'sphere' | 'cube' | 'ellipsoid';
+export type LightType = 'toggle' | 'dimmeable' | 'warmCold' | 'rgb' | 'rgbw' | 'remote' | 'nanoleafShapes';
+export type LightShape = 'sphere' | 'cube' | 'ellipsoid' | 'nanoleafShapes';
 
 export interface RemoteButton {
   entityId: string;
@@ -169,12 +169,12 @@ export interface DisplaySource {
 
 export type TextAlign = 'left' | 'center' | 'right';
 
-export type DisplayKind = 'info' | 'tv';
+export type DisplayKind = 'info' | 'tv' | 'pc' | 'console' | 'qnap';
 
 export interface DisplayConfig {
   id: string;
   label: string;
-  /** Info displays show sensor values; TV displays control a media_player entity. */
+  /** Info displays show sensor values; screen kinds show TV, PC, console, or NAS status. */
   kind?: DisplayKind;
   sources: DisplaySource[];
   position: LightPosition;
