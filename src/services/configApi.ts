@@ -89,9 +89,9 @@ export function updateConfig(data: {
   localStorage.setItem(CONFIG_KEY, JSON.stringify(merged));
 }
 
-/** Store a GLB model file in IndexedDB. */
-export async function uploadModel(file: File): Promise<void> {
-  await dbSaveModel(file);
+/** Store a GLB model in IndexedDB. Accepts Blob so a failed replacement can be rolled back. */
+export async function uploadModel(model: Blob): Promise<void> {
+  await dbSaveModel(model);
 }
 
 /** Get the GLB model blob from IndexedDB. */

@@ -20,7 +20,7 @@ A 3D floorplan dashboard for [Home Assistant](https://www.home-assistant.io/). L
 
 ## Recent fork additions
 
-- Runtime 3D model tools: replace/import models, adjust shared model scale, toggle textures, and keep scene objects aligned.
+- Runtime 3D model tools: replace the main GLB without reloading the page, automatically restore the previous model after a failed import, adjust shared scene scale, toggle textures, and keep placed objects aligned.
 - Model-object editor: select imported subobjects or uploaded objects and fine-tune position, rotation, and scale with shared gizmo modes.
 - Smart-home object expansion: blinds/covers, TV-style media-player displays, ellipsoid lights, and rotation/scale editing for placed items.
 - Editor polish: lower camera sensitivity, smoother zoom, German/English UI text, and more complete backup/restore coverage.

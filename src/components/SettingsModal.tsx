@@ -4,11 +4,11 @@ import {
   Server, Palette, Box, MonitorCloud, Hand, Cog, Info,
   LayoutTemplate, ChevronLeft, X,
   Monitor, Smartphone, Search, RotateCw, Move,
-  Github, HeartHandshake, Scale,
+  Github, HeartHandshake, Scale, Upload, RefreshCw, FileBox, AlertTriangle,
 } from 'lucide-react';
 import { buildWsUrl, type HAConnectionStatus } from '../services/haWebSocket';
 import type { HASettings } from '../types';
-import { getConfig, resetConfig, updateConfig, exportBackup, importBackup, uploadModel } from '../services/configApi';
+import { getConfig, getModelBlob, resetConfig, updateConfig, exportBackup, importBackup, uploadModel } from '../services/configApi';
 import { clearSettings, getSetting, getSettings, updateSettings } from '../services/settingsStore';
 import { MODEL_SCALE_MAX, MODEL_SCALE_MIN, normalizeModelScale } from '../babylon/SceneScale';
 import { useDemoMode } from '../contexts/DemoModeContext';
@@ -23,7 +23,7 @@ import {
 import { SYSTEM_LOCATION } from '../constants/location';
 import './SettingsModal.css';
 
-type Section = 'main' | 'connection' | 'appearance' | 'render' | 'environment' | 'controls' | 'system' | 'infos';
+type Section = 'main' | 'connection' | 'model' | 'appearance' | 'render' | 'environment' | 'controls' | 'system' | 'infos';
 
 interface Props {
   open: boolean;
@@ -93,10 +93,12 @@ interface Props {
   haStatus: HAConnectionStatus;
   modelStatus: string;
   modelStatusColor?: string;
+  onReloadModel: () => void;
 }
 
 const SECTIONS: { key: Section; labelKey: string; icon: typeof Server }[] = [
   { key: 'connection', labelKey: 'settings.connection', icon: Server },
+  { key: 'model', labelKey: 'settings.model3d', icon: FileBox },
   { key: 'appearance', labelKey: 'settings.appearance', icon: Palette },
   { key: 'render', labelKey: 'settings.render', icon: Box },
   { key: 'environment', labelKey: 'settings.environment', icon: MonitorCloud },
@@ -104,6 +106,11 @@ const SECTIONS: { key: Section; labelKey: string; icon: typeof Server }[] = [
   { key: 'system', labelKey: 'settings.system', icon: Cog },
   { key: 'infos', labelKey: 'settings.infos', icon: Info },
 ];
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export default function SettingsModal({
   open,
@@ -145,6 +152,7 @@ export default function SettingsModal({
   haStatus,
   modelStatus,
   modelStatusColor,
+  onReloadModel,
 }: Props) {
   const navigate = useNavigate();
   const { demoMode, setDemoMode } = useDemoMode();
@@ -167,9 +175,14 @@ export default function SettingsModal({
   const importInputRef = useRef<HTMLInputElement>(null);
   const modelInputRef = useRef<HTMLInputElement>(null);
   const [importStatus, setImportStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [modelReplaceStatus, setModelReplaceStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [modelReplaceStatus, setModelReplaceStatus] = useState<'idle' | 'applying' | 'restoring' | 'success' | 'error'>('idle');
+  const [selectedModelFile, setSelectedModelFile] = useState<File | null>(null);
   const [modelScaleValue, setModelScaleValue] = useState('1');
-  const [modelScaleStatus, setModelScaleStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [modelScaleStatus, setModelScaleStatus] = useState<'idle' | 'applying' | 'success' | 'error'>('idle');
+  const previousModelRef = useRef<Blob | null>(null);
+  const previousModelConfigRef = useRef<ReturnType<typeof getConfig>['model']>(undefined);
+  const modelReloadSeenRef = useRef(false);
+  const scaleReloadSeenRef = useRef(false);
   const [homeViewReset, setHomeViewReset] = useState<'idle' | 'done'>('idle');
 
   // Appearance state
@@ -220,9 +233,55 @@ export default function SettingsModal({
       setLongitude(String(cfg.location?.longitude ?? SYSTEM_LOCATION.longitude));
       setModelScaleValue(String(normalizeModelScale(cfg.model?.scale)));
       setModelReplaceStatus('idle');
+      setSelectedModelFile(null);
       setModelScaleStatus('idle');
     }
   }, [open]);
+
+  useEffect(() => {
+    if (modelReplaceStatus === 'applying' || modelReplaceStatus === 'restoring') {
+      if (modelStatus === 'loading') {
+        modelReloadSeenRef.current = true;
+        return;
+      }
+      if (!modelReloadSeenRef.current) return;
+
+      if (modelStatus === 'ready') {
+        if (modelReplaceStatus === 'restoring') {
+          setModelReplaceStatus('error');
+        } else {
+          setModelReplaceStatus('success');
+          setSelectedModelFile(null);
+        }
+        modelReloadSeenRef.current = false;
+      } else if (modelStatus === 'failed' && modelReplaceStatus === 'applying') {
+        const restorePreviousModel = async () => {
+          if (!previousModelRef.current) {
+            setModelReplaceStatus('error');
+            modelReloadSeenRef.current = false;
+            return;
+          }
+          setModelReplaceStatus('restoring');
+          modelReloadSeenRef.current = false;
+          await uploadModel(previousModelRef.current);
+          updateConfig({ model: previousModelConfigRef.current });
+          onReloadModel();
+        };
+        void restorePreviousModel();
+      }
+    }
+  }, [modelReplaceStatus, modelStatus, onReloadModel]);
+
+  useEffect(() => {
+    if (modelScaleStatus !== 'applying') return;
+    if (modelStatus === 'loading') {
+      scaleReloadSeenRef.current = true;
+      return;
+    }
+    if (!scaleReloadSeenRef.current) return;
+    setModelScaleStatus(modelStatus === 'ready' ? 'success' : 'error');
+    scaleReloadSeenRef.current = false;
+  }, [modelScaleStatus, modelStatus]);
 
   // Capture main page height once rendered
   useEffect(() => {
@@ -349,18 +408,22 @@ export default function SettingsModal({
           objectOverrides: cfg.model?.objectOverrides ?? [],
         },
       });
-      setModelScaleStatus('success');
-      setTimeout(() => window.location.reload(), 700);
+      scaleReloadSeenRef.current = false;
+      setModelScaleStatus('applying');
+      onReloadModel();
     } catch {
       setModelScaleStatus('error');
       setTimeout(() => setModelScaleStatus('idle'), 3000);
     }
-  }, [modelScaleValue]);
+  }, [modelScaleValue, onReloadModel]);
 
-  const handleReplaceModel = useCallback(async (file: File) => {
+  const handleReplaceModel = useCallback(async () => {
+    if (!selectedModelFile) return;
     try {
-      await uploadModel(file);
       const cfg = getConfig();
+      previousModelRef.current = await getModelBlob();
+      previousModelConfigRef.current = cfg.model;
+      await uploadModel(selectedModelFile);
       updateConfig({
         model: {
           ...cfg.model,
@@ -368,13 +431,14 @@ export default function SettingsModal({
           objectOverrides: [],
         },
       });
-      setModelReplaceStatus('success');
-      setTimeout(() => window.location.reload(), 800);
+      modelReloadSeenRef.current = false;
+      setModelReplaceStatus('applying');
+      onReloadModel();
     } catch {
       setModelReplaceStatus('error');
       setTimeout(() => setModelReplaceStatus('idle'), 3000);
     }
-  }, []);
+  }, [onReloadModel, selectedModelFile]);
 
   const haStatusColor =
     haStatus === 'connected' ? 'var(--green)' :
@@ -520,6 +584,122 @@ export default function SettingsModal({
                         : t('common.save')}
                     </button>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* 3D model */}
+            {(section === 'model' || (animating && prevSection === 'model')) && (
+              <div className="settings-page">
+                <div className="settings-model-status" role="status">
+                  <span
+                    className={`settings-model-status-dot status-${modelStatus}`}
+                    style={modelStatusColor ? { backgroundColor: modelStatusColor } : undefined}
+                  />
+                  <div>
+                    <span className="settings-model-status-label">{t('settings.currentModel')}</span>
+                    <strong>{t(`settings.modelStatus.${modelStatus}`)}</strong>
+                  </div>
+                </div>
+
+                <div className="settings-section">
+                  <div className="settings-section-label">{t('settings.replaceModel')}</div>
+                  <button
+                    className="settings-model-picker"
+                    disabled={modelReplaceStatus === 'applying' || modelReplaceStatus === 'restoring'}
+                    onClick={() => modelInputRef.current?.click()}
+                  >
+                    <Upload size={18} strokeWidth={1.5} />
+                    <span>
+                      <strong>{selectedModelFile ? selectedModelFile.name : t('settings.chooseGlb')}</strong>
+                      <small>
+                        {selectedModelFile
+                          ? t('settings.fileSize', { size: formatFileSize(selectedModelFile.size) })
+                          : t('settings.glbOnly')}
+                      </small>
+                    </span>
+                  </button>
+                  <input
+                    ref={modelInputRef}
+                    type="file"
+                    accept=".glb,model/gltf-binary"
+                    className="settings-hidden-input"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] ?? null;
+                      setSelectedModelFile(file);
+                      setModelReplaceStatus('idle');
+                      e.target.value = '';
+                    }}
+                  />
+
+                  {selectedModelFile && (
+                    <div className="settings-model-confirm">
+                      {(getConfig().model?.objectOverrides?.length ?? 0) > 0 && (
+                        <div className="settings-model-warning">
+                          <AlertTriangle size={16} strokeWidth={1.5} />
+                          <span>{t('settings.replaceModelWarning', { count: getConfig().model?.objectOverrides?.length ?? 0 })}</span>
+                        </div>
+                      )}
+                      <div className="settings-actions">
+                        <button
+                          className="settings-action-btn"
+                          disabled={modelReplaceStatus === 'applying' || modelReplaceStatus === 'restoring'}
+                          onClick={() => setSelectedModelFile(null)}
+                        >
+                          {t('common.cancel')}
+                        </button>
+                        <button
+                          className={`settings-action-btn settings-action-primary${modelReplaceStatus === 'success' ? ' ha-ok' : modelReplaceStatus === 'error' ? ' ha-err' : ''}`}
+                          disabled={modelReplaceStatus === 'applying' || modelReplaceStatus === 'restoring'}
+                          onClick={handleReplaceModel}
+                        >
+                          {modelReplaceStatus === 'applying' ? <><RefreshCw className="settings-spin" size={15} /> {t('settings.reloadingModel')}</>
+                            : modelReplaceStatus === 'restoring' ? <><RefreshCw className="settings-spin" size={15} /> {t('settings.restoringModel')}</>
+                            : t('settings.replaceNow')}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {modelReplaceStatus === 'success' && (
+                    <div className="settings-inline-feedback success">{t('settings.modelReplacedLive')}</div>
+                  )}
+                  {modelReplaceStatus === 'error' && (
+                    <div className="settings-inline-feedback error">{t('settings.modelReplaceFailedRestored')}</div>
+                  )}
+                </div>
+
+                <div className="settings-section">
+                  <div className="settings-section-label">{t('settings.sceneScale')}</div>
+                  <div className="settings-model-scale-row">
+                    <div className="settings-ha-field">
+                      <label className="settings-ha-label" htmlFor="settings-model-scale">{t('settings.scale')}</label>
+                      <input
+                        id="settings-model-scale"
+                        className="settings-ha-input"
+                        type="number"
+                        min={MODEL_SCALE_MIN}
+                        max={MODEL_SCALE_MAX}
+                        step="0.001"
+                        value={modelScaleValue}
+                        onChange={(e) => {
+                          setModelScaleValue(e.target.value);
+                          setModelScaleStatus('idle');
+                        }}
+                      />
+                    </div>
+                    <button
+                      className={`settings-action-btn${modelScaleStatus === 'success' ? ' ha-ok' : modelScaleStatus === 'error' ? ' ha-err' : ''}`}
+                      disabled={modelScaleStatus === 'applying'}
+                      onClick={handleApplyModelScale}
+                    >
+                      {modelScaleStatus === 'applying' ? <RefreshCw className="settings-spin" size={15} />
+                        : modelScaleStatus === 'success' ? `\u2713 ${t('settings.applied')}`
+                        : modelScaleStatus === 'error' ? `\u2717 ${t('common.failed')}`
+                        : t('settings.apply')}
+                    </button>
+                  </div>
+                  <p className="settings-model-hint">{t('settings.sceneScaleHint')}</p>
                 </div>
               </div>
             )}
@@ -1059,52 +1239,6 @@ export default function SettingsModal({
 
             {(section === 'system' || (animating && prevSection === 'system')) && (
               <div className="settings-page">
-                <div className="settings-section">
-                  <div className="settings-section-label">{t('settings.model3d')}</div>
-                  <div className="settings-ha-fields">
-                    <div className="settings-ha-row">
-                      <div className="settings-ha-field" style={{ flex: 1 }}>
-                        <label className="settings-ha-label">{t('settings.scale')}</label>
-                        <input
-                          className="settings-ha-input"
-                          type="number"
-                          min={MODEL_SCALE_MIN}
-                          max={MODEL_SCALE_MAX}
-                          step="0.001"
-                          value={modelScaleValue}
-                          onChange={(e) => setModelScaleValue(e.target.value)}
-                        />
-                      </div>
-                      <button
-                        className={`settings-action-btn${modelScaleStatus === 'success' ? ' ha-ok' : modelScaleStatus === 'error' ? ' ha-err' : ''}`}
-                        style={{ alignSelf: 'end' }}
-                        onClick={handleApplyModelScale}
-                      >
-                        {modelScaleStatus === 'success' ? `\u2713 ${t('settings.applied')}` : modelScaleStatus === 'error' ? `\u2717 ${t('common.failed')}` : t('settings.apply')}
-                      </button>
-                    </div>
-                    <div className="settings-actions">
-                      <button
-                        className={`settings-action-btn${modelReplaceStatus === 'success' ? ' ha-ok' : modelReplaceStatus === 'error' ? ' ha-err' : ''}`}
-                        onClick={() => modelInputRef.current?.click()}
-                      >
-                        {modelReplaceStatus === 'success' ? `\u2713 ${t('settings.replaced')}` : modelReplaceStatus === 'error' ? `\u2717 ${t('common.failed')}` : t('settings.replaceGlb')}
-                      </button>
-                      <input
-                        ref={modelInputRef}
-                        type="file"
-                        accept=".glb"
-                        style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden', opacity: 0 }}
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (file) await handleReplaceModel(file);
-                          e.target.value = '';
-                        }}
-                      />
-                    </div>
-                  </div>
-                </div>
-
                 <div className="settings-section">
                   <div className="settings-section-label">{t('settings.backup')}</div>
                   <div className="settings-actions">

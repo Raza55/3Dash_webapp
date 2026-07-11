@@ -400,6 +400,10 @@
 }
 
 .settings-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   background: none;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -411,6 +415,18 @@
   cursor: pointer;
   transition: all 0.15s;
   text-decoration: none;
+}
+
+.settings-action-btn:disabled,
+.settings-model-picker:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.settings-action-btn.settings-action-primary {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -428,6 +444,174 @@
 .settings-action-btn.ha-err {
   border-color: var(--red);
   color: var(--red);
+}
+
+/* Runtime model replacement */
+.settings-model-status {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 12px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+}
+
+.settings-model-status-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.settings-model-status > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-model-status-label,
+.settings-model-status strong {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.settings-model-status-label {
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.settings-model-status strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.settings-model-picker {
+  width: 100%;
+  min-height: 66px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.settings-model-picker > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-model-picker strong,
+.settings-model-picker small {
+  overflow-wrap: anywhere;
+  letter-spacing: 0.04em;
+}
+
+.settings-model-picker strong {
+  color: var(--text);
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.settings-model-picker small {
+  color: var(--muted);
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .settings-model-picker:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+  }
+}
+
+.settings-hidden-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.settings-model-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.settings-model-confirm .settings-actions {
+  flex-wrap: wrap;
+}
+
+.settings-model-confirm .settings-action-btn {
+  flex: 1 1 130px;
+}
+
+.settings-model-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  border-left: 2px solid var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 7%, transparent);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.settings-model-warning svg {
+  flex: 0 0 auto;
+  color: var(--yellow);
+}
+
+.settings-inline-feedback {
+  margin-top: 10px;
+  font-size: 10px;
+  line-height: 1.45;
+  letter-spacing: 0.04em;
+}
+
+.settings-inline-feedback.success { color: var(--green); }
+.settings-inline-feedback.error { color: var(--red); }
+
+.settings-model-scale-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.settings-model-hint {
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+}
+
+.settings-spin {
+  animation: settings-spin 0.9s linear infinite;
+}
+
+@keyframes settings-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* Divider & status */

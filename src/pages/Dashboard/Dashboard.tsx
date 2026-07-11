@@ -133,6 +133,14 @@ export default function Dashboard() {
   const [haSettingsVersion, setHaSettingsVersion] = useState(0);
   const [modelStatus, setModelStatus] = useState('loading');
   const [modelStatusColor, setModelStatusColor] = useState<string | undefined>(undefined);
+  const [modelReloadVersion, setModelReloadVersion] = useState(0);
+
+  const handleReloadModel = useCallback(() => {
+    setSceneReady(false);
+    setModelStatus('loading');
+    setModelStatusColor('var(--yellow)');
+    setModelReloadVersion((version) => version + 1);
+  }, []);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [modalEntityId, setModalEntityId] = useState<string | null>(null);
@@ -1181,7 +1189,7 @@ export default function Dashboard() {
       disposeGroundGrid();
       ctx.dispose();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [modelReloadVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Restore ground grid from localStorage once scene is ready
   useEffect(() => {
@@ -2076,6 +2084,7 @@ export default function Dashboard() {
           haStatus={haStatus}
           modelStatus={modelStatus}
           modelStatusColor={modelStatusColor}
+          onReloadModel={handleReloadModel}
         />
 
         {homeViewSetting && (
