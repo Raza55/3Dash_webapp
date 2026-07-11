@@ -683,6 +683,29 @@
   color: var(--accent);
 }
 
+.tube-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tube-preset-grid .btn-inline {
+  min-height: 38px;
+  justify-content: center;
+  white-space: normal;
+}
+
+.tube-option-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 4px;
+  font-size: 0.75em;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
 /* Tube slider stacked layout */
 .tube-slider-group {
   display: flex;

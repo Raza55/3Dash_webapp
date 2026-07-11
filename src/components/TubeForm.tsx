@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { TubeConfig, TubeLineConfig, TubeInputUnit, TubeOriginDirection, LightPosition } from '../types';
+import type { TubeConfig, TubeLineConfig, TubeInputUnit, TubeOriginDirection, TubeFlowType, LightPosition } from '../types';
 import { generateUUID } from '../utils/uuid';
 import { fineSliderRange } from '../utils/editorControls';
 import LucideIcon from './SidePanel/cards/LucideIcon';
@@ -25,6 +25,33 @@ interface Props {
 
 const UNIT_OPTIONS: TubeInputUnit[] = ['b', 'kb', 'mb', 'gb', 'tb', 'B', 'kB', 'mB', 'gB', 'tB'];
 
+type FlowPreset = 'network' | 'smartPlug' | 'electricityMeter' | 'waterMeter' | 'gasMeter';
+
+const PRESETS: Record<FlowPreset, { flowType: TubeFlowType; lines: TubeLineConfig[] }> = {
+  network: { flowType: 'network', lines: [
+    { sensorId: '', color: '#38bdf8', icon: 'Download', inputUnit: 'mb', particles: true, particleDirection: 'inward', particleMaxValue: 1000 },
+    { sensorId: '', color: '#22c55e', icon: 'Upload', inputUnit: 'mb', particles: true, particleDirection: 'outward', particleMaxValue: 1000 },
+  ] },
+  smartPlug: { flowType: 'electricity', lines: [
+    { sensorId: '', color: '#facc15', icon: 'Zap', displayUnit: 'W', autoScale: true, precision: 1, particles: true, particleMaxValue: 3000 },
+    { sensorId: '', color: '#f59e0b', icon: 'Gauge', displayUnit: 'kWh', autoScale: false, precision: 2 },
+    { sensorId: '', color: '#60a5fa', icon: 'Activity', displayUnit: 'V', autoScale: false, precision: 1 },
+    { sensorId: '', color: '#a78bfa', icon: 'Cable', displayUnit: 'A', autoScale: false, precision: 2 },
+  ] },
+  electricityMeter: { flowType: 'electricity', lines: [
+    { sensorId: '', color: '#facc15', icon: 'Zap', displayUnit: 'W', autoScale: true, precision: 1, particles: true, particleMaxValue: 10000 },
+    { sensorId: '', color: '#f59e0b', icon: 'Gauge', displayUnit: 'kWh', autoScale: false, precision: 2 },
+  ] },
+  waterMeter: { flowType: 'water', lines: [
+    { sensorId: '', color: '#38bdf8', icon: 'Droplets', displayUnit: 'L/min', autoScale: false, precision: 1, particles: true, particleMaxValue: 50 },
+    { sensorId: '', color: '#0ea5e9', icon: 'Gauge', displayUnit: 'm³', autoScale: false, precision: 3 },
+  ] },
+  gasMeter: { flowType: 'gas', lines: [
+    { sensorId: '', color: '#fb923c', icon: 'Flame', displayUnit: 'm³/h', autoScale: false, precision: 2, particles: true, particleMaxValue: 10 },
+    { sensorId: '', color: '#f59e0b', icon: 'Gauge', displayUnit: 'm³', autoScale: false, precision: 3 },
+  ] },
+};
+
 function defaultLine(): TubeLineConfig {
   return { sensorId: '', color: '#00aaff' };
 }
@@ -42,6 +69,7 @@ export default function TubeForm({
 }: Props) {
   const t = useTranslation();
   const [label, setLabel] = useState('');
+  const [flowType, setFlowType] = useState<TubeFlowType>('network');
   const [originDirection, setOriginDirection] = useState<TubeOriginDirection>('left');
   const [diameter, setDiameter] = useState(0.08);
   const [fontSize, setFontSize] = useState(48);
@@ -58,6 +86,9 @@ export default function TubeForm({
   const presetUnits = [
     { value: '', label: t('form.networkSpeed') },
     { value: 'W', label: t('form.watts') },
+    { value: 'kW', label: 'Kilowatt (kW)' },
+    { value: 'kWh', label: 'Kilowattstunden (kWh)' },
+    { value: 'MWh', label: 'Megawattstunden (MWh)' },
     { value: 'L', label: t('form.litres') },
     { value: 'L/min', label: t('form.litresMin') },
     { value: 'm³', label: t('form.cubicMeters') },
@@ -76,6 +107,7 @@ export default function TubeForm({
     if (!open) return;
     if (editTube) {
       setLabel(editTube.label);
+      setFlowType(editTube.flowType ?? 'network');
       setOriginDirection(editTube.originDirection);
       setDiameter(editTube.diameter);
       setFontSize(editTube.fontSize);
@@ -85,6 +117,7 @@ export default function TubeForm({
       setLines(editTube.lines.length > 0 ? editTube.lines.map(l => ({ ...l })) : [defaultLine()]);
     } else {
       setLabel('');
+      setFlowType('network');
       setOriginDirection('left');
       setDiameter(defaultSettings.diameter);
       setFontSize(defaultSettings.fontSize);
@@ -99,6 +132,7 @@ export default function TubeForm({
   const buildConfig = useCallback((): TubeConfig => ({
     id: editTube?.id || '__preview__',
     label,
+    flowType,
     originDirection,
     diameter,
     fontSize,
@@ -108,13 +142,20 @@ export default function TubeForm({
     labelPosition,
     labelHeight,
     lines,
-  }), [editTube, label, originDirection, diameter, fontSize, gap, position, labelPosition, labelHeight, lines]);
+  }), [editTube, label, flowType, originDirection, diameter, fontSize, gap, position, labelPosition, labelHeight, lines]);
 
   // Notify parent of preview changes
   useEffect(() => {
     if (!open) return;
     onPreviewChange({ config: buildConfig() });
-  }, [open, label, originDirection, diameter, fontSize, gap, labelPosition, labelHeight, lines, position]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, label, flowType, originDirection, diameter, fontSize, gap, labelPosition, labelHeight, lines, position]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const applyPreset = useCallback((preset: FlowPreset) => {
+    const next = PRESETS[preset];
+    setFlowType(next.flowType);
+    setLines(next.lines.map(line => ({ ...line })));
+    if (!label.trim()) setLabel(t(`flows.preset.${preset}`));
+  }, [label, t]);
 
   const handlePosChange = useCallback(
     (axis: 'x' | 'z', value: number) => {
@@ -147,7 +188,8 @@ export default function TubeForm({
   const handleSave = useCallback(() => {
     const cfg: TubeConfig = {
       id: editTube?.id || generateUUID(),
-      label: label || 'Tube',
+      label: label || t('flows.type.custom'),
+      flowType,
       originDirection,
       diameter,
       fontSize,
@@ -159,7 +201,7 @@ export default function TubeForm({
       lines,
     };
     onSave(cfg);
-  }, [editTube, label, originDirection, diameter, fontSize, gap, position, labelPosition, labelHeight, lines, onSave]);
+  }, [editTube, label, flowType, originDirection, diameter, fontSize, gap, position, labelPosition, labelHeight, lines, onSave, t]);
 
   const footer = (
     <>
@@ -237,6 +279,24 @@ export default function TubeForm({
             </div>
           );
         })}
+      </AccordionSection>
+
+      <AccordionSection title={t('flows.category')} defaultOpen>
+        <div className="field-group">
+          <select className="field-input" value={flowType} onChange={(e) => setFlowType(e.target.value as TubeFlowType)}>
+            {(['network', 'electricity', 'water', 'gas', 'custom'] as TubeFlowType[]).map(type => (
+              <option key={type} value={type}>{t(`flows.type.${type}`)}</option>
+            ))}
+          </select>
+        </div>
+        <div className="tube-preset-grid">
+          {(['network', 'smartPlug', 'electricityMeter', 'waterMeter', 'gasMeter'] as FlowPreset[]).map(preset => (
+            <button key={preset} type="button" className="btn-inline" onClick={() => applyPreset(preset)}>
+              {t(`flows.preset.${preset}`)}
+            </button>
+          ))}
+        </div>
+        <div className="form-hint">{t('flows.presetHint')}</div>
       </AccordionSection>
 
       <AccordionSection title={t('form.labelPositioning')}>
@@ -392,6 +452,16 @@ export default function TubeForm({
                   onChange={(e) => handleLineChange(i, 'displayUnit', e.target.value || '')}
                 />
               </div>
+            )}
+            {line.displayUnit && (
+              <label className="tube-option-check">
+                <input
+                  type="checkbox"
+                  checked={line.autoScale ?? true}
+                  onChange={(e) => handleLineChange(i, 'autoScale', e.target.checked)}
+                />
+                {t('flows.autoScale')}
+              </label>
             )}
             {!line.displayUnit && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', marginTop: 4 }}>

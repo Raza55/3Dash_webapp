@@ -8,10 +8,10 @@ A 3D floorplan dashboard for [Home Assistant](https://www.home-assistant.io/). L
 - **Light control** -- toggle, dim, color-pick, rotate, and scale lights directly from the 3D scene (supports on/off, dimmable, RGB, RGBW, and IR remote types)
 - **Blinds / covers** -- place slatted blinds in the model and link them to Home Assistant cover entities
 - **Wall displays and TV mode** -- render sensor data or connect media players with on/off screen states
-- **Network tubes** -- animated tubes that visualize real-time network throughput
+- **Energy & flows** -- animated paths for network traffic, electricity, water, gas, smart plugs, and meters
 - **Sun and weather** -- sun position tracks your real location; optional rain/snow particle effects
 - **Side panel** -- configurable cards for scripts, indicators, and graphs
-- **Config editor** -- define lights, blinds, displays, shadow walls, tubes, imported objects, and model-object overrides from a built-in UI
+- **Config editor** -- define lights, blinds, displays, light blockers, smart-home devices, energy flows, imported objects, and model-object overrides from a built-in UI
 - **Onboarding wizard** -- guided setup for first-time users
 - **Backup / restore** -- export and import your full configuration as a ZIP
 - **Demo mode** -- explore the dashboard without a Home Assistant instance
@@ -78,7 +78,7 @@ All configuration happens in the browser -- no config files to edit manually.
 | Location (for sun tracking) | Onboarding wizard or Settings |
 | Theme, rendering, camera | Settings modal |
 | 3D model, scale, textures, and object overrides | Settings and Config editor |
-| Lights, blinds, displays, shadow walls, tubes, imported objects | Config editor |
+| Lights, blinds, displays, light blockers, smart-home devices, energy flows, imported objects | Config editor |
 
 Configuration is persisted in `localStorage`. The 3D model is stored in `IndexedDB`.
 
@@ -86,7 +86,7 @@ Configuration is persisted in `localStorage`. The 3D model is stored in `Indexed
 
 ```
 src/
-  babylon/       3D scene, model loading, lights, blinds, displays, tubes, sun, weather
+  babylon/       3D scene, model loading, lights, blinds, displays, energy flows, sun, weather
   components/    React UI (HUD, modals, side panel, cards, forms, guided tour)
   pages/         Dashboard, config editor, onboarding
   services/      HA WebSocket client, config/settings persistence, storage

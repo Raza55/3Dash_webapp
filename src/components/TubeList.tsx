@@ -17,6 +17,7 @@ export default function TubeList({ tubes, selectedIdx, onSelect, onDelete, onDup
     top: `\u2191 ${t('common.top')}`,
     bottom: `\u2193 ${t('common.bottom')}`,
   };
+  const typeSymbols: Record<string, string> = { network: '⇄', electricity: '⚡', water: '≈', gas: '∿', custom: '┃' };
 
   if (tubes.length === 0) {
     return (
@@ -36,12 +37,12 @@ export default function TubeList({ tubes, selectedIdx, onSelect, onDelete, onDup
           onClick={() => onSelect(i)}
         >
           <div className="light-item-icon" style={{ color: tube.lines[0]?.color || '#888' }}>
-            &#x2503;
+            {typeSymbols[tube.flowType ?? 'network']}
           </div>
           <div className="light-item-info">
             <div className="light-item-name">{tube.label || tube.id}</div>
             <div className="light-item-meta">
-              {dirLabels[tube.originDirection] || tube.originDirection} &middot; {tube.lines.length} {tube.lines.length === 1 ? t('list.line') : t('list.lines')}
+              {t(`flows.type.${tube.flowType ?? 'network'}`)} &middot; {dirLabels[tube.originDirection] || tube.originDirection} &middot; {tube.lines.length} {tube.lines.length === 1 ? t('list.line') : t('list.lines')}
             </div>
           </div>
           <button

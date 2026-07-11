@@ -31,6 +31,7 @@ interface TubeLabelEntry {
   inputUnit: TubeInputUnit;
   displayBytes: boolean;
   displayUnit?: string;
+  autoScale: boolean;
   precision?: number;
   lastText: string;
   lastValue: string;
@@ -151,12 +152,18 @@ export function formatSpeed(raw: number, bytes = false, precision?: number): { v
 export function formatGenericValue(raw: number, unit: string, precision?: number): { value: string; unit: string } {
   const n = Math.abs(raw);
   const d = precision ?? 1;
-  if (n >= 1e9) return { value: (n / 1e9).toFixed(d), unit: `G${unit}` };
-  if (n >= 1e6) return { value: (n / 1e6).toFixed(d), unit: `M${unit}` };
-  if (n >= 1e3) return { value: (n / 1e3).toFixed(d), unit: `k${unit}` };
-  if (n >= 1)   return { value: n.toFixed(d), unit };
-  if (n >= 1e-3) return { value: (n * 1e3).toFixed(d), unit: `m${unit}` };
-  return { value: n.toFixed(precision ?? 2), unit };
+  if (n >= 1e9) return { value: (raw / 1e9).toFixed(d), unit: `G${unit}` };
+  if (n >= 1e6) return { value: (raw / 1e6).toFixed(d), unit: `M${unit}` };
+  if (n >= 1e3) return { value: (raw / 1e3).toFixed(d), unit: `k${unit}` };
+  if (n >= 1)   return { value: raw.toFixed(d), unit };
+  if (n >= 1e-3) return { value: (raw * 1e3).toFixed(d), unit: `m${unit}` };
+  return { value: raw.toFixed(precision ?? 2), unit };
+}
+
+function formatDisplayValue(raw: number, unit: string, precision: number | undefined, autoScale: boolean) {
+  return autoScale
+    ? formatGenericValue(raw, unit, precision)
+    : { value: raw.toFixed(precision ?? 1), unit };
 }
 
 // --- Direction helpers ---
@@ -523,6 +530,7 @@ export function createTubeMeshes(
       inputUnit: line.inputUnit ?? 'b',
       displayBytes: line.displayBytes ?? false,
       displayUnit: line.displayUnit,
+      autoScale: line.autoScale ?? true,
       precision: line.precision,
       lastText: '',
       lastValue: '',
@@ -734,7 +742,7 @@ export function updateTubeEntryValue(entry: TubeMeshEntry, sensorId: string, sta
   for (const label of entry.labels) {
     if (label.sensorId === sensorId) {
       if (label.displayUnit) {
-        const { value, unit } = formatGenericValue(raw, label.displayUnit, label.precision);
+        const { value, unit } = formatDisplayValue(raw, label.displayUnit, label.precision, label.autoScale);
         renderLabel(label, value, unit);
       } else {
         const bits = raw * UNIT_TO_BITS[label.inputUnit];
@@ -798,8 +806,8 @@ export function renderMockupLabels(tubeMap: TubeMap): void {
       let mockup: { value: string; unit: string };
       if (label.displayUnit) {
         mockup = i % 2 === 0
-          ? formatGenericValue(1234, label.displayUnit, label.precision)
-          : formatGenericValue(567, label.displayUnit, label.precision);
+          ? formatDisplayValue(1234, label.displayUnit, label.precision, label.autoScale)
+          : formatDisplayValue(567, label.displayUnit, label.precision, label.autoScale);
       } else {
         mockup = i % 2 === 0
           ? { value: '42.7', unit: 'Mb/s' }

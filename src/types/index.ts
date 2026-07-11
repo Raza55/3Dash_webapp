@@ -297,9 +297,10 @@ export interface LightSceneOption {
   label: string;
 }
 
-// --- Network Speed Tubes ---
+// --- Energy and flow visualisations ---
 
 export type TubeOriginDirection = 'top' | 'bottom' | 'left' | 'right';
+export type TubeFlowType = 'network' | 'electricity' | 'water' | 'gas' | 'custom';
 
 /** Unit the HA sensor reports its value in. Lowercase = bits, uppercase = bytes. */
 export type TubeInputUnit = 'b' | 'kb' | 'mb' | 'gb' | 'tb' | 'B' | 'kB' | 'mB' | 'gB' | 'tB';
@@ -318,6 +319,8 @@ export interface TubeLineConfig {
   /** Custom display unit (e.g. "W", "L", "m³", "L/min"). When set, bypasses speed formatting
    *  and uses generic SI auto-scaling instead. */
   displayUnit?: string;
+  /** Apply SI prefixes automatically (W -> kW). Disable when the sensor already reports kWh, m3, etc. */
+  autoScale?: boolean;
   /** Number of decimal places for the displayed value (default: 1 for generic, auto for speed). */
   precision?: number;
   /** Enable animated particles flowing inside the tube (default: false). */
@@ -333,6 +336,8 @@ export interface TubeLineConfig {
 export interface TubeConfig {
   id: string;
   label: string;
+  /** Semantic group used by the editor. Omitted legacy entries are treated as network flows. */
+  flowType?: TubeFlowType;
   /** Origin direction relative to home view. */
   originDirection: TubeOriginDirection;
   /** Tube diameter in world units. */
