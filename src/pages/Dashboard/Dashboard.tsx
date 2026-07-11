@@ -27,6 +27,7 @@ import {
   updateBlindState,
   type BlindMeshMap,
 } from '../../babylon/BlindMeshFactory';
+import { createSmartDeviceMesh, removeSmartDeviceMesh, updateSmartDeviceState, type SmartDeviceMeshMap } from '../../babylon/SmartDeviceMeshFactory';
 import { getConfig, updateConfig, getModelBlob, getModelObjectBlob } from '../../services/configApi';
 import { getEntityCache, setEntityCache } from '../../services/entityCache';
 import type { HAEntityOption } from '../../components/EntityPicker';
@@ -111,6 +112,7 @@ export default function Dashboard() {
   const sceneCtxRef = useRef<SceneContext | null>(null);
   const meshMapRef = useRef<MeshMap>({});
   const blindMeshMapRef = useRef<BlindMeshMap>({});
+  const smartDeviceMeshMapRef = useRef<SmartDeviceMeshMap>({});
   const displayMeshMapRef = useRef<DisplayMeshMap>({});
   const tubeMapRef = useRef<TubeMap>({});
   const panelEntityIdsRef = useRef<Set<string>>(new Set());
@@ -949,6 +951,10 @@ export default function Dashboard() {
           blindMeshMapRef.current[cfg.entityId] = createBlindMesh(ctx.scene, cfg, 0, entityScaleRootRef.current ?? undefined);
         }
 
+        for (const configDevice of config.smartDevices || []) {
+          smartDeviceMeshMapRef.current[configDevice.id] = createSmartDeviceMesh(ctx.scene, configDevice, entityScaleRootRef.current ?? undefined);
+        }
+
         // Freeze PointLight shadow maps after first render (static geometry)
         ctx.scene.onAfterRenderObservable.addOnce(() => {
           freezePointLightShadows(meshMapRef.current);
@@ -1004,11 +1010,19 @@ export default function Dashboard() {
       let pressedDisplayId: string | null = null;
       let pressedBlindId: string | null = null;
       let pressedTubeId: string | null = null;
+      let pressedSmartDeviceId: string | null = null;
 
       ctx.scene.onPointerDown = (evt, pickResult) => {
         if (evt.button > 0) return;
         if (!pickResult.hit || !pickResult.pickedMesh) return;
-        const meta = pickResult.pickedMesh.metadata as { entityId?: string; displayId?: string; blindId?: string; tubeId?: string } | null;
+        const meta = pickResult.pickedMesh.metadata as { entityId?: string; displayId?: string; blindId?: string; tubeId?: string; smartDeviceId?: string } | null;
+
+        if (meta?.smartDeviceId) {
+          pressedSmartDeviceId = meta.smartDeviceId;
+          pressStartX = evt.clientX;
+          pressStartY = evt.clientY;
+          return;
+        }
 
         // Display click — immediate open, no long-press
         if (meta?.displayId) {
@@ -1046,6 +1060,26 @@ export default function Dashboard() {
       };
 
       ctx.scene.onPointerUp = (_evt) => {
+        if (pressedSmartDeviceId) {
+          const dx = _evt.clientX - pressStartX;
+          const dy = _evt.clientY - pressStartY;
+          if (dx * dx + dy * dy <= MOVE_THRESHOLD * MOVE_THRESHOLD) {
+            const device = configRef.current?.smartDevices?.find((candidate) => candidate.id === pressedSmartDeviceId);
+            if (device && haRef.current && device.action !== 'none') {
+              const domain = device.entityId.split('.')[0];
+              const service = device.action === 'start' ? (domain === 'vacuum' ? 'start' : 'turn_on')
+                : device.action === 'returnHome' ? 'return_to_base'
+                : device.action === 'press' ? (domain === 'button' ? 'press' : 'turn_on')
+                : 'toggle';
+              haRef.current.callService(domain, service, device.entityId).catch((error) => {
+                console.warn('[SmartDevice] Action failed:', error);
+              });
+            }
+          }
+          pressedSmartDeviceId = null;
+          return;
+        }
+
         // Handle display tap
         if (pressedDisplayId) {
           const dx = _evt.clientX - pressStartX;
@@ -1121,6 +1155,11 @@ export default function Dashboard() {
       };
 
       ctx.scene.onPointerMove = (_evt, pickResult) => {
+        if (pressedSmartDeviceId) {
+          const dx = _evt.clientX - pressStartX;
+          const dy = _evt.clientY - pressStartY;
+          if (dx * dx + dy * dy > MOVE_THRESHOLD * MOVE_THRESHOLD) pressedSmartDeviceId = null;
+        }
         if (pressedDisplayId) {
           const dx = _evt.clientX - pressStartX;
           const dy = _evt.clientY - pressStartY;
@@ -1151,8 +1190,8 @@ export default function Dashboard() {
             pressedEntity = null;
           }
         }
-        const meshMeta = pickResult.pickedMesh?.metadata as { entityId?: string; displayId?: string; blindId?: string; tubeId?: string } | null;
-        if (pickResult.hit && (meshMeta?.entityId || meshMeta?.displayId || meshMeta?.blindId || meshMeta?.tubeId)) {
+        const meshMeta = pickResult.pickedMesh?.metadata as { entityId?: string; displayId?: string; blindId?: string; tubeId?: string; smartDeviceId?: string } | null;
+        if (pickResult.hit && (meshMeta?.entityId || meshMeta?.displayId || meshMeta?.blindId || meshMeta?.tubeId || meshMeta?.smartDeviceId)) {
           canvas!.style.cursor = 'pointer';
         } else {
           canvas!.style.cursor = 'default';
@@ -1177,6 +1216,9 @@ export default function Dashboard() {
       );
       Object.keys(displayMeshMapRef.current).forEach((id) =>
         removeDisplayMesh(displayMeshMapRef.current, id),
+      );
+      Object.keys(smartDeviceMeshMapRef.current).forEach((id) =>
+        removeSmartDeviceMesh(smartDeviceMeshMapRef.current, id),
       );
       disposeAllTubes(tubeMapRef.current);
       for (const result of Object.values(importedObjectResultsRef.current)) {
@@ -1223,6 +1265,9 @@ export default function Dashboard() {
         }
         if (meshMapRef.current[entityId]) applyLightState(entityId, state);
         if (blindMeshMapRef.current[entityId]) updateBlindState(blindMeshMapRef.current[entityId], state);
+        for (const entry of Object.values(smartDeviceMeshMapRef.current)) {
+          if (entry.config.entityId === entityId) updateSmartDeviceState(entry, state);
+        }
         if (entityId === modalEntityIdRef.current) setModalState(state);
         if (entityId === modalDoubleTapEntityIdRef.current) setModalDoubleTapState(state);
         if (entityId === remoteModalEntityIdRef.current) setRemoteModalState(state);
@@ -1269,6 +1314,9 @@ export default function Dashboard() {
           lastStatesRef.current[state.entity_id] = state;
           if (meshMapRef.current[state.entity_id]) applyLightState(state.entity_id, state);
           if (blindMeshMapRef.current[state.entity_id]) updateBlindState(blindMeshMapRef.current[state.entity_id], state);
+          for (const entry of Object.values(smartDeviceMeshMapRef.current)) {
+            if (entry.config.entityId === state.entity_id) updateSmartDeviceState(entry, state);
+          }
           if (panelEntityIdsRef.current.has(state.entity_id)) newCardStates[state.entity_id] = state;
         });
         if (Object.keys(newCardStates).length > 0) {

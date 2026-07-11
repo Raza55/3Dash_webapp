@@ -84,10 +84,13 @@
 .editor-tabs {
   display: flex;
   border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .editor-tab {
   flex: 1;
+  min-width: 92px;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
@@ -105,6 +108,16 @@
 .editor-tab.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
+}
+
+.smart-device-group + .smart-device-group { margin-top: 12px; }
+
+.smart-device-group-title {
+  padding: 5px 4px 7px;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 /* Light list */

@@ -133,6 +133,26 @@ export interface ShadowWallConfig {
   rotation?: LightPosition;
 }
 
+// --- Smart-home devices ---
+
+export type SmartDeviceGroup = 'kitchen' | 'climate' | 'cleaning' | 'security' | 'entertainment' | 'other';
+export type SmartDeviceType = 'coffeeMaker' | 'fan' | 'vacuum' | 'airPurifier' | 'humidifier' | 'speaker' | 'camera' | 'generic';
+export type SmartDeviceAction = 'toggle' | 'start' | 'returnHome' | 'press' | 'none';
+
+export interface SmartDeviceConfig {
+  id: string;
+  entityId: string;
+  label: string;
+  group: SmartDeviceGroup;
+  type: SmartDeviceType;
+  action: SmartDeviceAction;
+  position: LightPosition;
+  /** Visual rotation in degrees. */
+  rotation?: LightPosition;
+  /** Visual scale multiplier for the selected device preset. */
+  scale?: LightPosition;
+}
+
 // --- Wall Displays ---
 
 export type DisplayAnimation = 'spin' | 'pulse' | 'glow' | 'bounce' | 'flash';
@@ -218,6 +238,7 @@ export interface AppConfig {
   lightGroups?: LightGroup[];
   displays?: DisplayConfig[];
   shadowWalls?: ShadowWallConfig[];
+  smartDevices?: SmartDeviceConfig[];
   sidePanel?: SidePanelConfig;
   tubes?: TubeConfig[];
   onboarding?: OnboardingState;
@@ -241,6 +262,7 @@ export interface FullConfig {
   lightGroups?: LightGroup[];
   displays?: DisplayConfig[];
   shadowWalls?: ShadowWallConfig[];
+  smartDevices?: SmartDeviceConfig[];
   sidePanel?: SidePanelConfig;
   tubes?: TubeConfig[];
   onboarding?: OnboardingState;
