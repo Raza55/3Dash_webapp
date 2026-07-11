@@ -2870,25 +2870,6 @@ export default function ConfigEditor() {
           </button>
         </div>
 
-        <div className="editor-transform-tools" role="toolbar" aria-label={t('editor.transformTools')}>
-          {TRANSFORM_MODES.map((mode) => {
-            const Icon = mode === 'move' ? Move3d : mode === 'rotate' ? Rotate3d : Scale3d;
-            return (
-              <button
-                key={mode}
-                className={`editor-transform-btn${transformMode === mode ? ' active' : ''}`}
-                onClick={() => setTransformMode(mode)}
-                aria-label={t(`modelObjects.${mode}`)}
-                aria-pressed={transformMode === mode}
-                title={t(`modelObjects.${mode}`)}
-              >
-                <Icon size={14} strokeWidth={1.8} aria-hidden="true" />
-                <span>{t(`modelObjects.${mode}`)}</span>
-              </button>
-            );
-          })}
-        </div>
-
         <div className="light-list">
           {editorMode === 'lights' ? (
             <LightList
@@ -2997,27 +2978,42 @@ export default function ConfigEditor() {
         <div className={`mode-banner${placingMode ? ' visible' : ''}`}>
           {displayPanelOpen ? t('editor.placeDisplayBanner') : blindPanelOpen ? t('editor.placeBlindBanner') : wallPanelOpen ? t('editor.placeWallBanner') : t('editor.placeLightBanner')}
         </div>
-        <div className="editor-render-toggle">
+        <div className="editor-view-toolbar editor-transform-toolbar" role="toolbar" aria-label={t('editor.transformTools')}>
+          {TRANSFORM_MODES.map((mode) => {
+            const Icon = mode === 'move' ? Move3d : mode === 'rotate' ? Rotate3d : Scale3d;
+            return (
+              <button
+                key={mode}
+                className={`editor-view-tool-btn${transformMode === mode ? ' active' : ''}`}
+                onClick={() => setTransformMode(mode)}
+                aria-label={t(`modelObjects.${mode}`)}
+                aria-pressed={transformMode === mode}
+                title={t(`modelObjects.${mode}`)}
+              >
+                <Icon size={16} strokeWidth={1.8} aria-hidden="true" />
+              </button>
+            );
+          })}
+        </div>
+        <div className="editor-view-toolbar editor-render-toolbar" role="toolbar" aria-label={t('settings.render')}>
           <button
-            className={`editor-texture-toggle${showTextures ? ' active' : ''}`}
+            className={`editor-view-tool-btn${showTextures ? ' active' : ''}`}
             onClick={() => handleEditorTexturesChange(!showTextures)}
             aria-label={`${t('settings.textures')} ${showTextures ? t('common.on') : t('common.off')}`}
             aria-pressed={showTextures}
             title={`${t('settings.textures')} ${showTextures ? t('common.on') : t('common.off')}`}
           >
-            <span className="editor-texture-toggle-thumb">
-              {showTextures
-                ? <ImageIcon size={12} strokeWidth={1.8} aria-hidden="true" />
-                : <ImageOff size={12} strokeWidth={1.8} aria-hidden="true" />}
-            </span>
+            {showTextures
+              ? <ImageIcon size={16} strokeWidth={1.8} aria-hidden="true" />
+              : <ImageOff size={16} strokeWidth={1.8} aria-hidden="true" />}
           </button>
           <button
-            className="editor-recenter-btn"
+            className="editor-view-tool-btn"
             onClick={recenterView}
             aria-label={t('common.recenter')}
             title={t('common.recenter')}
           >
-            <Crosshair size={12} strokeWidth={1.8} aria-hidden="true" />
+            <Crosshair size={16} strokeWidth={1.8} aria-hidden="true" />
           </button>
         </div>
         <div className="coord-readout">{coordText}</div>
