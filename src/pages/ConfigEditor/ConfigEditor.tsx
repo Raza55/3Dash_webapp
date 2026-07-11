@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Crosshair, Image as ImageIcon, ImageOff, Move3d, Rotate3d, Scale3d } from 'lucide-react';
+import { Activity, Box, BrickWall, Crosshair, Image as ImageIcon, ImageOff, LampCeiling, Monitor, Move3d, PanelTopClose, Rotate3d, Scale3d, Cpu } from 'lucide-react';
 import { generateUUID } from '../../utils/uuid';
 import {
   Vector3,
@@ -3010,50 +3010,71 @@ export default function ConfigEditor() {
           <button
             className={`editor-tab${editorMode === 'lights' ? ' active' : ''}`}
             onClick={() => setEditorMode('lights')}
+            title={t('editor.lights')}
+            aria-label={`${t('editor.lights')}: ${lights.length}`}
           >
-            {t('editor.lights')} ({lights.length})
+            <LampCeiling aria-hidden="true" />
+            <span className="editor-tab-count">{lights.length}</span>
           </button>
           <button
             className={`editor-tab${editorMode === 'blinds' ? ' active' : ''}`}
             data-tab="blinds"
             onClick={() => setEditorMode('blinds')}
+            title={t('editor.blinds')}
+            aria-label={`${t('editor.blinds')}: ${blinds.length}`}
           >
-            {t('editor.blinds')} ({blinds.length})
+            <PanelTopClose aria-hidden="true" />
+            <span className="editor-tab-count">{blinds.length}</span>
           </button>
           <button
             className={`editor-tab${editorMode === 'displays' ? ' active' : ''}`}
             data-tab="displays"
             onClick={() => setEditorMode('displays')}
+            title={t('editor.displays')}
+            aria-label={`${t('editor.displays')}: ${displays.length}`}
           >
-            {t('editor.displays')} ({displays.length})
+            <Monitor aria-hidden="true" />
+            <span className="editor-tab-count">{displays.length}</span>
           </button>
           <button
             className={`editor-tab${editorMode === 'walls' ? ' active' : ''}`}
             data-tab="walls"
             onClick={() => setEditorMode('walls')}
+            title={t('editor.walls')}
+            aria-label={`${t('editor.walls')}: ${shadowWalls.length}`}
           >
-            {t('editor.walls')} ({shadowWalls.length})
+            <BrickWall aria-hidden="true" />
+            <span className="editor-tab-count">{shadowWalls.length}</span>
           </button>
           <button
             className={`editor-tab${editorMode === 'smartDevices' ? ' active' : ''}`}
             data-tab="smartDevices"
             onClick={() => setEditorMode('smartDevices')}
+            title={t('editor.smartDevices')}
+            aria-label={`${t('editor.smartDevices')}: ${smartDevices.length}`}
           >
-            {t('editor.smartDevices')} ({smartDevices.length})
+            <Cpu aria-hidden="true" />
+            <span className="editor-tab-count">{smartDevices.length}</span>
           </button>
           <button
             className={`editor-tab${editorMode === 'tubes' ? ' active' : ''}`}
             data-tab="tubes"
             onClick={() => setEditorMode('tubes')}
+            title={t('editor.tubes')}
+            aria-label={`${t('editor.tubes')}: ${tubes.length}`}
           >
-            {t('editor.tubes')} ({tubes.length})
+            <Activity aria-hidden="true" />
+            <span className="editor-tab-count">{tubes.length}</span>
           </button>
           <button
             className={`editor-tab${editorMode === 'modelObjects' ? ' active' : ''}`}
             data-tab="modelObjects"
             onClick={() => setEditorMode('modelObjects')}
+            title={t('editor.modelObjects')}
+            aria-label={`${t('editor.modelObjects')}: ${modelObjects.length}`}
           >
-            {t('editor.modelObjects')} ({modelObjects.length})
+            <Box aria-hidden="true" />
+            <span className="editor-tab-count">{modelObjects.length}</span>
           </button>
         </div>
 
