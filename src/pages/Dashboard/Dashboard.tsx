@@ -10,6 +10,8 @@ import {
   createLightMesh,
   removeLightMesh,
   freezePointLightShadows,
+  setLightTouchZoneHovered,
+  updateLightInteractionVisual,
   type MeshMap,
   type StripConfig,
 } from '../../babylon/LightMeshFactory';
@@ -588,6 +590,7 @@ export default function Dashboard() {
         col.g * multiplier,
         col.b * multiplier,
       ).clampToRef(0, 1, entry.mat.emissiveColor);
+      updateLightInteractionVisual(entry, col, true);
     },
     [hexToColor3],
   );
@@ -613,6 +616,7 @@ export default function Dashboard() {
           pl.setEnabled(false);
         }
         mat.emissiveColor = new Color3(0, 0, 0);
+        updateLightInteractionVisual(entry, new Color3(0.22, 0.42, 0.58), false);
         updateLightsOnCount();
         return;
       }
@@ -676,6 +680,7 @@ export default function Dashboard() {
         col.g * bulbGlow,
         col.b * bulbGlow,
       ).clampToRef(0, 1, mat.emissiveColor);
+      updateLightInteractionVisual(entry, col, true);
 
       updateLightsOnCount();
     },
@@ -736,7 +741,7 @@ export default function Dashboard() {
     const entry = meshMapRef.current[entityId];
     if (!entry) return;
 
-    const meshes = [entry.bulb, ...entry.extraBulbs].filter(Boolean) as Mesh[];
+    const meshes = [entry.bulb, ...entry.extraBulbs, ...entry.fixtureMeshes].filter(Boolean) as Mesh[];
     for (const m of meshes) hl.addMesh(m, PENDING_COLOR);
 
     let t = 0;
@@ -1011,6 +1016,7 @@ export default function Dashboard() {
       let pressedBlindId: string | null = null;
       let pressedTubeId: string | null = null;
       let pressedSmartDeviceId: string | null = null;
+      let hoveredLightEntityId: string | null = null;
 
       ctx.scene.onPointerDown = (evt, pickResult) => {
         if (evt.button > 0) return;
@@ -1191,6 +1197,18 @@ export default function Dashboard() {
           }
         }
         const meshMeta = pickResult.pickedMesh?.metadata as { entityId?: string; displayId?: string; blindId?: string; tubeId?: string; smartDeviceId?: string } | null;
+        const nextHoveredLight = pickResult.hit && meshMeta?.entityId ? meshMeta.entityId : null;
+        if (nextHoveredLight !== hoveredLightEntityId) {
+          if (hoveredLightEntityId) {
+            const previous = meshMapRef.current[hoveredLightEntityId];
+            if (previous) setLightTouchZoneHovered(previous, false);
+          }
+          if (nextHoveredLight) {
+            const next = meshMapRef.current[nextHoveredLight];
+            if (next) setLightTouchZoneHovered(next, true);
+          }
+          hoveredLightEntityId = nextHoveredLight;
+        }
         if (pickResult.hit && (meshMeta?.entityId || meshMeta?.displayId || meshMeta?.blindId || meshMeta?.tubeId || meshMeta?.smartDeviceId)) {
           canvas!.style.cursor = 'pointer';
         } else {

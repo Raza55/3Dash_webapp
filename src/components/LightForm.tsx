@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
-import type { LightConfig, LightType, LightPosition, LightPart, HitboxConfig, LightShape } from '../types';
+import type { LightConfig, LightType, LightPosition, LightPart, HitboxConfig, LightShape, LightFixtureStyle } from '../types';
 import { fineSliderRange } from '../utils/editorControls';
 import { FormPanel, AccordionSection } from './FormPanel';
 import EntityPicker, { type HAEntityOption } from './EntityPicker';
@@ -163,6 +163,10 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
   const [warmth, setWarmth] = useState(3000);
   const [brightness, setBrightness] = useState(1);
   const [doubleTapEntityId, setDoubleTapEntityId] = useState('');
+  const [fixtureStyle, setFixtureStyle] = useState<LightFixtureStyle>('none');
+  const [touchZone, setTouchZone] = useState(false);
+  const [showTouchIcon, setShowTouchIcon] = useState(true);
+  const [touchOpacity, setTouchOpacity] = useState(0.06);
 
   // Multi-part state
   const [multiPart, setMultiPart] = useState(false);
@@ -229,6 +233,10 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
       setWarmth(editLight.warmth ?? 3000);
       setBrightness(editLight.brightness ?? 1);
       setDoubleTapEntityId(editLight.doubleTapEntityId ?? '');
+      setFixtureStyle(editLight.fixtureStyle ?? 'none');
+      setTouchZone(editLight.interaction?.touchZone ?? false);
+      setShowTouchIcon(editLight.interaction?.showIcon ?? true);
+      setTouchOpacity(editLight.interaction?.idleOpacity ?? 0.06);
       const hasParts = editLight.parts && editLight.parts.length > 0;
       setMultiPart(!!hasParts);
       setParts(hasParts ? editLight.parts!.map(partFromConfig) : []);
@@ -257,6 +265,10 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
       setWarmth(3000);
       setBrightness(1);
       setDoubleTapEntityId('');
+      setFixtureStyle('none');
+      setTouchZone(false);
+      setShowTouchIcon(true);
+      setTouchOpacity(0.06);
       setMultiPart(false);
       setParts([]);
       setUseCustomHitbox(false);
@@ -332,6 +344,10 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
       position,
       rotation: optionalRotation(rotation),
       scale: optionalScale(scale),
+      fixtureStyle,
+      interaction: touchZone
+        ? { touchZone: true, showIcon: showTouchIcon, idleOpacity: touchOpacity }
+        : undefined,
       warmth: (type === 'toggle' || type === 'dimmeable' || type === 'remote') ? warmth : undefined,
       brightness,
       hitbox,
@@ -352,7 +368,7 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
     }
 
     onSave(cfg);
-  }, [entityId, label, type, shape, diameter, width, height, depth, position, rotation, scale, warmth, brightness, doubleTapEntityId, onSave, useCustomHitbox, multiPart, parts, hbShape, hbDiameter, hbWidth, hbHeight, hbDepth, hbPosX, hbPosY, hbPosZ, hbRotation, hbScale, t]);
+  }, [entityId, label, type, shape, diameter, width, height, depth, position, rotation, scale, fixtureStyle, touchZone, showTouchIcon, touchOpacity, warmth, brightness, doubleTapEntityId, onSave, useCustomHitbox, multiPart, parts, hbShape, hbDiameter, hbWidth, hbHeight, hbDepth, hbPosX, hbPosY, hbPosZ, hbRotation, hbScale, t]);
 
   const handlePosChange = useCallback(
     (axis: 'x' | 'y' | 'z', value: number) => {
@@ -501,6 +517,72 @@ const LightForm = forwardRef<LightFormHandle, Props>(function LightForm({
             {t('form.doubleTapHint')}
           </span>
         </div>
+      </AccordionSection>
+
+      <AccordionSection title={t('form.lightVisual')} defaultOpen>
+        <div className="field-group">
+          <label className="field-label">{t('form.fixtureModel')}</label>
+          <select
+            className="field-select"
+            value={fixtureStyle}
+            onChange={(e) => setFixtureStyle(e.target.value as LightFixtureStyle)}
+          >
+            <option value="none">{t('form.fixtureNone')}</option>
+            <option value="ceiling">{t('form.fixtureCeiling')}</option>
+            <option value="pendant">{t('form.fixturePendant')}</option>
+            <option value="floor">{t('form.fixtureFloor')}</option>
+            <option value="spot">{t('form.fixtureSpot')}</option>
+            <option value="strip">{t('form.fixtureStrip')}</option>
+          </select>
+          <span className="field-label" style={{ opacity: 0.55, fontSize: 11, marginTop: 3 }}>
+            {t('form.fixtureHint')}
+          </span>
+        </div>
+
+        <div className="field-group">
+          <label className="field-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={touchZone}
+              onChange={(e) => {
+                const enabled = e.target.checked;
+                setTouchZone(enabled);
+                if (enabled && !useCustomHitbox) {
+                  setUseCustomHitbox(true);
+                  setHbShape('sphere');
+                  setHbDiameter(Math.max(defaultSize.hitboxDiameter, diameter * 1.8));
+                  setHbPosX(position.x);
+                  setHbPosY(position.y);
+                  setHbPosZ(position.z);
+                }
+              }}
+            />
+            {t('form.touchZone')}
+          </label>
+        </div>
+
+        {touchZone && (
+          <>
+            <div className="field-group">
+              <label className="field-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" checked={showTouchIcon} onChange={(e) => setShowTouchIcon(e.target.checked)} />
+                {t('form.touchIcon')}
+              </label>
+            </div>
+            <div className="field-group">
+              <label className="field-label">{t('form.touchOpacity', { value: Math.round(touchOpacity * 100) })}</label>
+              <input
+                type="range"
+                className="pos-slider"
+                min={0.01}
+                max={0.25}
+                step={0.01}
+                value={touchOpacity}
+                onChange={(e) => setTouchOpacity(parseFloat(e.target.value))}
+              />
+            </div>
+          </>
+        )}
       </AccordionSection>
 
       <AccordionSection title={t('form.shape')}>

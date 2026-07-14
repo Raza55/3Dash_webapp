@@ -5,7 +5,7 @@ A 3D floorplan dashboard for [Home Assistant](https://www.home-assistant.io/). L
 ## Features
 
 - **3D floorplan** -- load a custom `.glb` model, adjust model scale, import extra 3D objects, and navigate freely
-- **Light control** -- toggle, dim, color-pick, rotate, and scale lights directly from the 3D scene (supports on/off, dimmable, RGB, RGBW, and IR remote types)
+- **Light control** -- toggle, dim, color-pick, rotate, and scale lights directly from the 3D scene, with optional 3D fixtures and translucent icon touch zones (supports on/off, dimmable, RGB, RGBW, and IR remote types)
 - **Blinds / covers** -- place slatted blinds in the model and link them to Home Assistant cover entities
 - **Wall displays and TV mode** -- render sensor data or connect media players with on/off screen states
 - **Energy & flows** -- animated paths for network traffic, electricity, water, gas, smart plugs, and meters

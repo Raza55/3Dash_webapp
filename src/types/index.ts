@@ -13,6 +13,16 @@ export interface LightPosition {
 
 export type LightType = 'toggle' | 'dimmeable' | 'warmCold' | 'rgb' | 'rgbw' | 'remote' | 'nanoleafShapes';
 export type LightShape = 'sphere' | 'cube' | 'ellipsoid' | 'nanoleafShapes';
+export type LightFixtureStyle = 'none' | 'ceiling' | 'pendant' | 'floor' | 'spot' | 'strip';
+
+export interface LightInteractionConfig {
+  /** Render the hitbox as a subtle touch zone in the live dashboard. */
+  touchZone?: boolean;
+  /** Show a camera-facing light icon above the touch zone. */
+  showIcon?: boolean;
+  /** Opacity of the touch zone while it is not hovered. */
+  idleOpacity?: number;
+}
 
 export interface RemoteButton {
   entityId: string;
@@ -55,6 +65,10 @@ export interface LightConfig {
   rotation?: LightPosition;
   /** Visual scale multiplier after size has been applied. */
   scale?: LightPosition;
+  /** Optional built-in 3D fixture surrounding the emissive light source. */
+  fixtureStyle?: LightFixtureStyle;
+  /** Live-dashboard interaction visualisation. */
+  interaction?: LightInteractionConfig;
   /** Base color temperature in Kelvin (2000-6500). Used as default color for toggle/dimmeable lights. */
   warmth?: number;
   /** Intensity multiplier for the 3D point light (0.1–1000, default 1). Applies to all light types. */

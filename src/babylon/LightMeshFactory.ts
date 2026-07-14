@@ -8,6 +8,7 @@ import {
   ShadowGenerator,
   Quaternion,
   Mesh,
+  DynamicTexture,
   type AbstractMesh,
   type Node,
 } from '@babylonjs/core';
@@ -26,6 +27,12 @@ export interface LightMeshEntry {
   /** Custom hitbox mesh for click detection. Invisible by default, shown when editing. */
   hitboxMesh?: Mesh;
   hitboxMat?: StandardMaterial;
+  fixtureMeshes: Mesh[];
+  fixtureMat?: StandardMaterial;
+  touchIconMesh?: Mesh;
+  touchIconMat?: StandardMaterial;
+  touchIconTexture?: DynamicTexture;
+  touchIdleOpacity: number;
 }
 
 export type MeshMap = Record<string, LightMeshEntry>;
@@ -117,6 +124,8 @@ export function createLightMesh(
     bulb.applyFog = false;
   }
 
+  const { meshes: fixtureMeshes, material: fixtureMat } = createFixtureMeshes(scene, cfg, id);
+
   let pointLight: PointLight | undefined;
   let shadowGen: ShadowGenerator | undefined;
   const stripLights: PointLight[] = [];
@@ -174,7 +183,8 @@ export function createLightMesh(
   // Create custom hitbox mesh if configured (or auto-create for multi-part)
   let hitboxMesh: Mesh | undefined;
   let hitboxMat: StandardMaterial | undefined;
-  const needsHitbox = cfg.hitbox || hasParts;
+  const touchZoneEnabled = cfg.interaction?.touchZone ?? false;
+  const needsHitbox = cfg.hitbox || hasParts || touchZoneEnabled;
   if (needsHitbox) {
     if (cfg.hitbox) {
       const hbShape = cfg.hitbox.shape;
@@ -185,7 +195,7 @@ export function createLightMesh(
         : pos.clone();
       hitboxMesh.position = hbPos;
       applyTransform(hitboxMesh, cfg.hitbox.rotation, cfg.hitbox.scale);
-    } else {
+    } else if (hasParts) {
       // Auto-create bounding-box hitbox for multi-part lights
       const bounds = computePartsBounds(cfg.parts!);
       hitboxMesh = MeshBuilder.CreateBox(`hitbox_${id}`, {
@@ -194,23 +204,57 @@ export function createLightMesh(
         depth: bounds.size.z,
       }, scene);
       hitboxMesh.position = bounds.center;
+    } else {
+      const dimensions = getShapeDimensions(cfg.shape ?? 'sphere', cfg.size ?? {});
+      const diameter = Math.max(dimensions.x, dimensions.y, dimensions.z, 0.45);
+      hitboxMesh = MeshBuilder.CreateSphere(`hitbox_${id}`, { diameter }, scene);
+      hitboxMesh.position = pos.clone();
     }
     hitboxMesh.metadata = { entityId: cfg.entityId };
     hitboxMesh.isPickable = true;
 
     hitboxMat = new StandardMaterial(`hitboxmat_${id}`, scene);
     hitboxMat.disableLighting = true;
-    hitboxMat.emissiveColor = new Color3(1, 0.2, 0.8); // magenta
-    hitboxMat.alpha = 0.3;
-    hitboxMat.wireframe = true;
+    hitboxMat.emissiveColor = touchZoneEnabled ? new Color3(0.15, 0.65, 1) : new Color3(1, 0.2, 0.8);
+    hitboxMat.diffuseColor = hitboxMat.emissiveColor.clone();
+    hitboxMat.alpha = touchZoneEnabled ? Math.max(0.01, Math.min(0.35, cfg.interaction?.idleOpacity ?? 0.06)) : 0.3;
+    hitboxMat.wireframe = !touchZoneEnabled;
+    hitboxMat.backFaceCulling = false;
+    hitboxMat.disableDepthWrite = touchZoneEnabled;
     hitboxMesh.material = hitboxMat;
-    hitboxMesh.visibility = 0; // invisible by default
+    hitboxMesh.visibility = touchZoneEnabled && withPointLight ? 1 : 0;
 
     // When hitbox exists, bulb should not catch clicks
     bulb.isPickable = false;
   }
 
-  const entry = { bulb, extraBulbs, mat, light: pointLight, stripLights, shadowGen, hitboxMesh, hitboxMat };
+  let touchIconMesh: Mesh | undefined;
+  let touchIconMat: StandardMaterial | undefined;
+  let touchIconTexture: DynamicTexture | undefined;
+  if (touchZoneEnabled && cfg.interaction?.showIcon !== false && hitboxMesh) {
+    const icon = createTouchIcon(scene, cfg, id, hitboxMesh.position);
+    touchIconMesh = icon.mesh;
+    touchIconMat = icon.material;
+    touchIconTexture = icon.texture;
+    touchIconMesh.setEnabled(withPointLight);
+  }
+
+  const entry: LightMeshEntry = {
+    bulb,
+    extraBulbs,
+    mat,
+    light: pointLight,
+    stripLights,
+    shadowGen,
+    hitboxMesh,
+    hitboxMat,
+    fixtureMeshes,
+    fixtureMat,
+    touchIconMesh,
+    touchIconMat,
+    touchIconTexture,
+    touchIdleOpacity: Math.max(0.01, Math.min(0.35, cfg.interaction?.idleOpacity ?? 0.06)),
+  };
   if (parent) parentLightEntry(entry, parent);
   return entry;
 }
@@ -218,9 +262,113 @@ export function createLightMesh(
 function parentLightEntry(entry: LightMeshEntry, parent: Node): void {
   entry.bulb.parent = parent;
   for (const mesh of entry.extraBulbs) mesh.parent = parent;
+  for (const mesh of entry.fixtureMeshes) mesh.parent = parent;
   if (entry.hitboxMesh) entry.hitboxMesh.parent = parent;
+  if (entry.touchIconMesh) entry.touchIconMesh.parent = parent;
   if (entry.light) entry.light.parent = parent;
   for (const light of entry.stripLights) light.parent = parent;
+}
+
+function createFixtureMeshes(scene: Scene, cfg: LightConfig, id: string): { meshes: Mesh[]; material?: StandardMaterial } {
+  const style = cfg.fixtureStyle ?? 'none';
+  if (style === 'none') return { meshes: [] };
+
+  const material = new StandardMaterial(`fixturemat_${id}`, scene);
+  material.diffuseColor = new Color3(0.16, 0.18, 0.21);
+  material.specularColor = new Color3(0.35, 0.38, 0.42);
+  material.roughness = 0.55;
+  const base = new Vector3(cfg.position.x, cfg.position.y, cfg.position.z);
+  const size = getShapeDimensions(cfg.shape ?? 'sphere', cfg.size ?? {});
+  const radius = Math.max(0.08, Math.max(size.x, size.z) * 0.65);
+  const meshes: Mesh[] = [];
+
+  const add = (mesh: Mesh, offset: Vector3) => {
+    mesh.position = base.add(rotateVector(offset, cfg.rotation));
+    if (cfg.rotation) mesh.rotation.set(toRadians(cfg.rotation.x), toRadians(cfg.rotation.y), toRadians(cfg.rotation.z));
+    mesh.material = material;
+    mesh.isPickable = false;
+    mesh.applyFog = false;
+    meshes.push(mesh);
+  };
+
+  if (style === 'ceiling') {
+    add(MeshBuilder.CreateCylinder(`fixture_${id}_canopy`, { diameter: radius * 2.2, height: radius * 0.28, tessellation: 32 }, scene), new Vector3(0, radius * 0.5, 0));
+    add(MeshBuilder.CreateTorus(`fixture_${id}_rim`, { diameter: radius * 1.8, thickness: radius * 0.18, tessellation: 32 }, scene), new Vector3(0, radius * 0.15, 0));
+  } else if (style === 'pendant') {
+    add(MeshBuilder.CreateCylinder(`fixture_${id}_cable`, { diameter: radius * 0.1, height: radius * 2.8, tessellation: 16 }, scene), new Vector3(0, radius * 1.7, 0));
+    add(MeshBuilder.CreateCylinder(`fixture_${id}_shade`, { diameterTop: radius * 0.65, diameterBottom: radius * 2.1, height: radius * 0.9, tessellation: 32 }, scene), new Vector3(0, radius * 0.45, 0));
+  } else if (style === 'floor') {
+    add(MeshBuilder.CreateCylinder(`fixture_${id}_base`, { diameter: radius * 1.8, height: radius * 0.2, tessellation: 32 }, scene), new Vector3(0, -radius * 3.8, 0));
+    add(MeshBuilder.CreateCylinder(`fixture_${id}_stem`, { diameter: radius * 0.12, height: radius * 3.8, tessellation: 16 }, scene), new Vector3(0, -radius * 1.9, 0));
+    add(MeshBuilder.CreateCylinder(`fixture_${id}_shade`, { diameterTop: radius * 0.8, diameterBottom: radius * 2.2, height: radius, tessellation: 32 }, scene), new Vector3(0, radius * 0.15, 0));
+  } else if (style === 'spot') {
+    const spot = MeshBuilder.CreateCylinder(`fixture_${id}_spot`, { diameterTop: radius * 1.3, diameterBottom: radius * 1.8, height: radius * 1.8, tessellation: 32 }, scene);
+    add(spot, new Vector3(0, 0, radius * 0.55));
+    spot.rotation.x += Math.PI / 2;
+  } else if (style === 'strip') {
+    add(MeshBuilder.CreateBox(`fixture_${id}_strip`, { width: Math.max(size.x * 1.08, radius * 3), height: Math.max(size.y * 1.35, 0.06), depth: Math.max(size.z * 1.35, 0.06) }, scene), Vector3.Zero());
+  }
+
+  return { meshes, material };
+}
+
+function createTouchIcon(scene: Scene, cfg: LightConfig, id: string, center: Vector3) {
+  const texture = new DynamicTexture(`touchicontex_${id}`, { width: 128, height: 128 }, scene, true);
+  texture.hasAlpha = true;
+  const ctx = texture.getContext();
+  ctx.clearRect(0, 0, 128, 128);
+  ctx.strokeStyle = '#ffffff';
+  ctx.fillStyle = 'rgba(8, 18, 30, 0.72)';
+  ctx.lineWidth = 7;
+  ctx.beginPath();
+  ctx.arc(64, 64, 46, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(64, 53, 20, Math.PI * 0.15, Math.PI * 0.85, true);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(48, 66); ctx.lineTo(52, 76); ctx.lineTo(76, 76); ctx.lineTo(80, 66);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(54, 87); ctx.lineTo(74, 87);
+  ctx.stroke();
+  texture.update();
+
+  const material = new StandardMaterial(`touchiconmat_${id}`, scene);
+  material.disableLighting = true;
+  material.diffuseTexture = texture;
+  material.emissiveTexture = texture;
+  material.opacityTexture = texture;
+  material.useAlphaFromDiffuseTexture = true;
+  material.emissiveColor = new Color3(0.45, 0.75, 1);
+  material.backFaceCulling = false;
+
+  const dimensions = cfg.hitbox ? getShapeDimensions(cfg.hitbox.shape, cfg.hitbox.size) : getShapeDimensions(cfg.shape ?? 'sphere', cfg.size ?? {});
+  const iconSize = Math.max(0.18, Math.min(0.42, Math.max(dimensions.x, dimensions.y, dimensions.z) * 0.42));
+  const mesh = MeshBuilder.CreatePlane(`touchicon_${id}`, { size: iconSize }, scene);
+  mesh.position = center.add(new Vector3(0, Math.max(dimensions.y * 0.62, iconSize * 0.8), 0));
+  mesh.billboardMode = Mesh.BILLBOARDMODE_ALL;
+  mesh.material = material;
+  mesh.metadata = { entityId: cfg.entityId };
+  mesh.isPickable = true;
+  mesh.renderingGroupId = 2;
+  return { mesh, material, texture };
+}
+
+export function setLightTouchZoneHovered(entry: LightMeshEntry, hovered: boolean): void {
+  if (!entry.hitboxMat || !entry.hitboxMesh || entry.hitboxMesh.visibility === 0) return;
+  entry.hitboxMat.alpha = hovered ? Math.max(0.18, entry.touchIdleOpacity * 3) : entry.touchIdleOpacity;
+  if (entry.touchIconMesh) entry.touchIconMesh.scaling.setAll(hovered ? 1.12 : 1);
+}
+
+export function updateLightInteractionVisual(entry: LightMeshEntry, color: Color3, isOn: boolean): void {
+  const displayColor = isOn ? color : new Color3(0.22, 0.42, 0.58);
+  if (entry.hitboxMat) {
+    entry.hitboxMat.emissiveColor.copyFrom(displayColor);
+    entry.hitboxMat.diffuseColor.copyFrom(displayColor);
+  }
+  if (entry.touchIconMat) entry.touchIconMat.emissiveColor.copyFrom(displayColor);
 }
 
 /** Create a shadow generator for a PointLight. */
@@ -463,6 +611,11 @@ export function removeLightMesh(meshMap: MeshMap, entityId: string): void {
     if (sl !== entry.light) sl.dispose();
   }
   for (const eb of entry.extraBulbs) eb.dispose();
+  for (const fixture of entry.fixtureMeshes) fixture.dispose();
+  entry.fixtureMat?.dispose();
+  entry.touchIconMesh?.dispose();
+  entry.touchIconMat?.dispose();
+  entry.touchIconTexture?.dispose();
   entry.hitboxMesh?.dispose();
   entry.bulb.dispose();
   entry.light?.dispose();
