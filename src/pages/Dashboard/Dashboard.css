@@ -60,48 +60,13 @@
 }
 
 .dashboard-render-toggle .dashboard-icon-btn,
-.dashboard-render-toggle .dashboard-recenter-btn {
+.dashboard-render-toggle .dashboard-recenter-btn,
+.dashboard-render-toggle .dashboard-texture-btn {
   align-items: center;
   display: inline-flex;
   justify-content: center;
   min-width: 28px;
   padding: 4px;
-}
-
-.dashboard-render-toggle .dashboard-texture-toggle {
-  align-items: center;
-  background: rgba(15, 23, 42, 0.75);
-  border-color: var(--border);
-  border-radius: 999px;
-  display: inline-flex;
-  height: 24px;
-  justify-content: flex-start;
-  min-width: 46px;
-  padding: 1px;
-  transition: background 0.15s, border-color 0.15s;
-}
-
-.dashboard-render-toggle .dashboard-texture-toggle.active {
-  background: color-mix(in srgb, var(--accent) 18%, rgba(15, 23, 42, 0.75));
-  border-color: var(--accent);
-}
-
-.dashboard-texture-toggle-thumb {
-  align-items: center;
-  background: rgba(148, 163, 184, 0.18);
-  border-radius: 999px;
-  color: var(--muted);
-  display: inline-flex;
-  height: 20px;
-  justify-content: center;
-  transition: transform 0.16s ease, color 0.15s, background 0.15s;
-  width: 20px;
-}
-
-.dashboard-texture-toggle.active .dashboard-texture-toggle-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  color: var(--accent);
-  transform: translateX(22px);
 }
 
 .dashboard-render-toggle button:hover {

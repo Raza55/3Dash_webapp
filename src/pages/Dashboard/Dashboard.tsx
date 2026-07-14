@@ -2009,17 +2009,15 @@ export default function Dashboard() {
 
         <div className="dashboard-render-toggle">
           <button
-            className={`dashboard-texture-toggle${showTextures ? ' active' : ''}`}
+            className={`dashboard-icon-btn dashboard-texture-btn${showTextures ? ' active' : ''}`}
             onClick={() => handleShowTexturesChange(!showTextures)}
             aria-label={`${t('settings.textures')} ${showTextures ? t('common.on') : t('common.off')}`}
             aria-pressed={showTextures}
             title={`${t('settings.textures')} ${showTextures ? t('common.on') : t('common.off')}`}
           >
-            <span className="dashboard-texture-toggle-thumb">
-              {showTextures
-                ? <ImageIcon size={12} strokeWidth={1.8} aria-hidden="true" />
-                : <ImageOff size={12} strokeWidth={1.8} aria-hidden="true" />}
-            </span>
+            {showTextures
+              ? <ImageIcon size={14} strokeWidth={1.8} aria-hidden="true" />
+              : <ImageOff size={14} strokeWidth={1.8} aria-hidden="true" />}
           </button>
           <button
             className="dashboard-icon-btn dashboard-recenter-btn"
