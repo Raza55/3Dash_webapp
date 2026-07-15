@@ -29,7 +29,7 @@ All configuration happens in the browser -- no files to edit manually.
 | Location (for sun tracking) | Onboarding wizard or Settings |
 | Theme, rendering, camera | Settings modal |
 | 3D model replacement, model scale, and texture toggle | Settings and Config editor |
-| Lights, blinds/covers, displays, TV mode, shadow walls, tubes, imported objects | Config editor |
+| Lights, blinds/covers, screens/computers, light blockers, smart-home devices, energy flows, imported objects | Config editor |
 
 ## Added editor features
 
@@ -37,6 +37,11 @@ All configuration happens in the browser -- no files to edit manually.
 - Add blinds/covers as slatted rectangular surfaces and connect them to Home Assistant cover entities.
 - Use TV mode on displays to connect a `media_player` entity and show on/off screen states.
 - Import additional 3D objects and fine-tune model subobjects without rewriting the original model file.
+- Add built-in 3D light fixtures and optional translucent icon touch zones.
+- Visualise network, electricity, water, gas, smart plugs, and meters under Energy & Flows.
+
+For a complete overview of additions in the `featureaddon` fork, see
+[`FORK_CHANGES.md`](../FORK_CHANGES.md).
 
 ## SSL / HTTPS
 

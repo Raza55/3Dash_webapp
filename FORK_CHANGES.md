@@ -1,0 +1,155 @@
+# Feature-Übersicht des Forks
+
+Diese Datei dokumentiert die Erweiterungen des Branches `featureaddon` gegenüber
+`upstream/main` von `Kdcius/3Dash_webapp`. Die Änderungen bleiben mit bestehenden
+Konfigurationen kompatibel: Neue Felder sind optional und werden erst durch die
+entsprechenden Editor-Funktionen gesetzt.
+
+## 3D-Modell und zusätzliche Objekte
+
+- Das Hauptmodell kann zur Laufzeit in den Einstellungen durch eine neue GLB-Datei
+  ersetzt oder erneut geladen werden.
+- Vor dem Austausch wird die Datei geprüft. Schlägt das Laden fehl, wird das zuvor
+  verwendete Modell wiederhergestellt.
+- Eine gemeinsame Szenenskalierung hält Hauptmodell, Lampen, Rollos, Screens,
+  Energieflüsse und weitere platzierte Objekte relativ zueinander ausgerichtet.
+- Texturen lassen sich im Editor und in der normalen 3D-Ansicht über kompakte
+  Icon-Buttons ein- und ausschalten.
+- Zusätzliche Modelle können als GLB, glTF, OBJ oder STL importiert werden.
+- Importierte Modelle besitzen Position, Rotation und Skalierung und werden getrennt
+  vom Hauptmodell gespeichert.
+- Unterobjekte des Hauptmodells können ausgewählt und mit lokalen Overrides für
+  Position, Rotation und Skalierung feinjustiert werden. Die ursprüngliche GLB-Datei
+  wird dabei nicht verändert.
+- Beim Ersetzen des Hauptmodells werden nicht mehr zuverlässig passende
+  Unterobjekt-Overrides verworfen; platzierte Smart-Home-Objekte bleiben erhalten.
+
+## Editor und Bedienung
+
+- Der Editor ist als eigener Eintrag auf der obersten Ebene des Seitenpanels erreichbar.
+- Die Editor-Kategorien verwenden kompakte Lucide-Icons mit Anzahl, Tooltip und
+  zugänglichem `aria-label` statt langer Tab-Texte.
+- Die globalen Transformationsmodi Verschieben, Drehen und Skalieren stehen direkt in
+  der 3D-Ansicht zur Verfügung.
+- Position, Ausrichtung und Skalierung sind in den Objektformularen als eigene Bereiche
+  organisiert und für Lampen, Rollos, Screens, Lichtblocker, Smart-Home-Geräte,
+  importierte Modelle und Modell-Unterobjekte verfügbar.
+- Slider arbeiten in feineren, wertbezogenen Bereichen, damit kleine Änderungen mit
+  der Maus weniger empfindlich sind.
+- Orbit-Panning, Rechtsklick-Verschieben und Zoom wurden ruhiger abgestimmt.
+- Zur besseren Orientierung kann die Modelltextur im Editor direkt umgeschaltet werden.
+- Die Editor-Kopfzeile zeigt den Zurück-Button links und den Editor-Titel rechts.
+- Deutsch und Englisch wurden für die neuen Oberflächen und geführten Touren ergänzt.
+
+## Lampen und Home Assistant
+
+- Lampen unterstützen Kugel, Würfel, Ellipsoid, mehrteilige Formen, Lichtleisten und
+  Nanoleaf-Shapes-ähnliche Paneele.
+- Position, Rotation und dreiachsige Skalierung können unabhängig bearbeitet werden.
+- Eine eigene Hitbox kann als Kugel, Box oder Ellipsoid positioniert, gedreht und
+  skaliert werden.
+- Integrierte Leuchtenkörper stehen für Deckenleuchte, Pendelleuchte, Stehleuchte,
+  Spot und Lichtleiste zur Verfügung. Dabei handelt es sich um leichte prozedurale
+  3D-Geometrie, nicht um externe oder markengebundene GLB-Dateien.
+- Optional kann die Hitbox in der Live-Ansicht als halbtransparente Touch-Zone mit
+  schwebendem, kamerazugewandtem Licht-Icon angezeigt werden.
+- Die Touch-Zone übernimmt Farbe und Zustand der Home-Assistant-Lampe, wird beim
+  Darüberfahren hervorgehoben und bleibt im ausgeschalteten Zustand neutral sichtbar.
+- Ein kurzer Tap schaltet die Lampe. Langes Drücken öffnet die Detailsteuerung.
+- Doppeltippen kann optional eine zweite Entity, etwa einen Deckenventilator, schalten.
+- Dimmen, Farbtemperatur, RGB-Farbe und Hue-/Home-Assistant-Szenen stehen in der
+  Live-Ansicht zur Verfügung.
+- Bedienelemente werden anhand der von Home Assistant gelieferten `supported_color_modes`
+  nur angezeigt, wenn die jeweilige Lampe sie tatsächlich unterstützt.
+- Helligkeit und Farbe beeinflussen sowohl das emissive Leuchtmaterial als auch die
+  Babylon-Lichtquelle. Eine Mindestdarstellung verhindert, dass eingeschaltete, stark
+  gedimmte Lampen fälschlich wie ausgeschaltet wirken.
+- IR-/Remote-Lichter können Modi und Farben über zusätzliche Entities abbilden.
+
+## Rollos und Cover-Entities
+
+- Die Kategorie Rollos verbindet rechteckige 3D-Rollos mit Home-Assistant-Entities
+  aus der Domain `cover`.
+- Unterstützt werden Öffnen, Schließen, Stoppen und eine Zielposition in Prozent,
+  sofern die Entity die jeweiligen Funktionen bereitstellt.
+- Teilweise geöffnete Rollos werden mit sichtbaren Lamellen dargestellt.
+- Breite, Höhe, Tiefe, Lamellenzahl, Position, Rotation und Skalierung sind editierbar.
+- Der aktuelle Cover-Zustand wird in der Live-Ansicht visualisiert und aktualisiert.
+
+## Screens und Computer
+
+- Der frühere Display-Bereich heißt `Screens/Computer`.
+- Verfügbare Typen sind Informationsanzeige, TV, PC, Konsole und QNAP/NAS.
+- Der TV-Modus kann eine `media_player`-Entity verbinden und zeigt unter anderem
+  Ein/Aus-Zustand, Quelle, App, Lautstärke und verfügbare Medieninformationen.
+- Der ausgeschaltete Bildschirm wird dunkel dargestellt; aktive Screens erhalten eine
+  passende Leuchtwirkung.
+- Größe, Position, Ausrichtung und Skalierung sind im rechten Editor-Panel einstellbar.
+- Neue Screens und andere platzierte Objekte verwenden relativ zur Modellgröße
+  berechnete Standardmaße.
+
+## Lichtblocker
+
+- Die frühere Kategorie `Wände` heißt `Lichtblocker`.
+- Lichtblocker sind unsichtbare Geometrien für Stellen, an denen das importierte Modell
+  keine geeignete schattenwerfende Wand, Decke oder Fläche enthält.
+- Position, Größe, Rotation und Skalierung können im Editor angepasst werden.
+
+## Smart-Home-Geräte
+
+- Eine eigene Kategorie bündelt platzierbare Smart-Home-Geräte in funktionalen Gruppen.
+- Vorhandene Gruppen sind Küche, Klima/Luft, Reinigung, Unterhaltung, Sicherheit,
+  Netzwerk und Sonstiges.
+- Vorlagen umfassen unter anderem Kaffeemaschine, Ventilator, Luftreiniger,
+  Luftqualitätssensor, Saugroboter, Lautsprecher, Kamera und allgemeines Gerät.
+- Geräte können mit einer Home-Assistant-Entity verbunden werden und je nach Typ
+  Aktionen wie Umschalten, Einschalten, Starten, Zurückkehren zur Basis oder Drücken
+  auslösen.
+- Zustand, Farbe und Animation der 3D-Markierung reagieren auf die Entity.
+- Position, Rotation und Skalierung sind editierbar.
+
+## Energie und Flüsse
+
+- Die frühere Kategorie `Tubes` heißt `Energie & Flüsse`.
+- Flusstypen sind Netzwerk, Strom, Wasser, Gas und frei definierte Messflüsse.
+- Vorlagen erzeugen passende Messquellen für Netzwerk, Smart Plug, Stromzähler,
+  Wasserzähler und Gaszähler.
+- Unterstützte Einheiten umfassen unter anderem Bit/s, Byte/s, W, kW, kWh, MWh, V,
+  A, L/min, m³ und m³/h.
+- SI-Einheiten können automatisch skaliert werden. Diese Funktion lässt sich für
+  Sensoren deaktivieren, die bereits eine Einheit wie `kWh` oder `m³` liefern.
+- Animierte Partikel zeigen Richtung und Intensität des Messflusses.
+- Ein Smart Plug wird zum Schalten unter Smart-Home-Geräte angelegt; seine Leistungs-,
+  Energie-, Spannungs- und Stromsensoren werden unter Energie & Flüsse visualisiert.
+
+## Daten, Backup und Kompatibilität
+
+- Die Konfiguration enthält zusätzliche optionale Blöcke für Modellskalierung,
+  Unterobjekt-Overrides, importierte Objekte, Rollos, Smart-Home-Geräte,
+  Leuchtenmodelle, Touch-Zonen und Energieflusstypen.
+- Konfiguration und Einstellungen werden weiterhin im Browser gespeichert. Große
+  Modelldateien liegen in IndexedDB.
+- Backup und Wiederherstellung umfassen Modell, Einstellungen, platzierte Objekte und
+  die neu hinzugefügten Konfigurationsbereiche.
+- Alte Lampen- und Tube-Konfigurationen bleiben gültig und verwenden ihre bisherigen
+  Standardwerte, solange keine neue Darstellung gewählt wird.
+
+## Noch nicht enthalten
+
+- Der Leuchteneditor lädt noch kein individuelles GLB direkt als Lampenkörper. Eigene
+  Modelle können bereits als zusätzliche 3D-Objekte importiert und zusammen mit einer
+  Lampe sowie deren Touch-Zone platziert werden.
+- Lokale Unterobjekt-Overrides werden nicht in die GLB-Datei zurückgeschrieben und es
+  gibt noch keinen GLB-Export der bearbeiteten Szene.
+
+## Technische Prüfung
+
+Die Änderungen werden vor dem Commit mit folgenden Befehlen geprüft:
+
+```bash
+npx tsc --noEmit
+npm run build
+```
+
+Der Entwicklungsbranch ist `featureaddon` im Fork
+[`Raza55/3Dash_webapp`](https://github.com/Raza55/3Dash_webapp).
