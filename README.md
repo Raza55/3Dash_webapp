@@ -21,7 +21,7 @@ A 3D floorplan dashboard for [Home Assistant](https://www.home-assistant.io/). L
 ## Recent fork additions
 
 A complete, categorized overview is available in
-[`FORK_CHANGES.md`](./FORK_CHANGES.md).
+[`FORK_CHANGES.en.md`](./FORK_CHANGES.en.md) ([Deutsch](./FORK_CHANGES.md)).
 
 - Runtime 3D model tools: replace the main GLB without reloading the page, automatically restore the previous model after a failed import, adjust shared scene scale, toggle textures, and keep placed objects aligned.
 - Smart-home device markers: place coffee makers, fans, robot vacuums, air-quality devices, speakers, cameras, and generic appliances in functional subgroups and connect them to Home Assistant entities.

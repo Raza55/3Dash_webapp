@@ -1,5 +1,7 @@
 # Feature-Übersicht des Forks
 
+Deutsch | [English](./FORK_CHANGES.en.md)
+
 Diese Datei dokumentiert die Erweiterungen des Branches `featureaddon` gegenüber
 `upstream/main` von `Kdcius/3Dash_webapp`. Die Änderungen bleiben mit bestehenden
 Konfigurationen kompatibel: Neue Felder sind optional und werden erst durch die

@@ -41,7 +41,7 @@ All configuration happens in the browser -- no files to edit manually.
 - Visualise network, electricity, water, gas, smart plugs, and meters under Energy & Flows.
 
 For a complete overview of additions in the `featureaddon` fork, see
-[`FORK_CHANGES.md`](../FORK_CHANGES.md).
+[`FORK_CHANGES.en.md`](../FORK_CHANGES.en.md) ([Deutsch](../FORK_CHANGES.md)).
 
 ## SSL / HTTPS
 
