@@ -19,6 +19,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "jszip": "^3.10.1",
     "lucide-react": "^0.577.0",
+    "polygon-clipping": "^0.15.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-grid-layout": "^2.2.3",

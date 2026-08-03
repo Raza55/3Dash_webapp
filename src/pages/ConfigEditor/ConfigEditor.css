@@ -536,6 +536,12 @@
 .editor-room-toolbar { top: 58px; left: 14px; }
 .editor-render-toolbar { right: 14px; }
 
+@media (min-width: 1101px) and (max-width: 1450px) {
+  .editor-canvas.form-open .editor-room-toolbar {
+    flex-direction: column;
+  }
+}
+
 .editor-view-tool-btn {
   width: 32px;
   height: 32px;

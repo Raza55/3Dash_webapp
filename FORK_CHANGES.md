@@ -100,6 +100,14 @@ entsprechenden Editor-Funktionen gesetzt.
   oder Erkennen einer weiteren Fläche sichtbar. Ihre Polygonkanten werden auf derselben
   Ebene automatisch als endliche virtuelle Trennwände für die Raumerkennung verwendet,
   ohne sie als manuelle Wände in den neuen Raum zu kopieren.
+- Die automatische Erkennung zieht bereits zugeordnete Raumflächen derselben Etage
+  geometrisch von der neuen Kontur ab und behält den freien Teil am angeklickten
+  Bodenpunkt. Ist dort keine überlappungsfreie, als einfaches Polygon darstellbare
+  Fläche vorhanden, wird die Erkennung abgelehnt statt eine Überschneidung anzulegen.
+- Mit dem Scheren-Werkzeug lässt sich eine bestehende Raumfläche direkt in der
+  3D-Ansicht teilen: Zwei Bodenpunkte definieren die Schnittlinie, danach wird der
+  Teil angeklickt, der dem aktuellen Raum zugeordnet bleiben soll. Die übrigen Teile
+  werden frei und können anschließend einem anderen Raum zugewiesen werden.
 - Solange keine Kontur erkannt wurde, bleiben Transformationswerkzeuge und Speichern
   ausgeblendet beziehungsweise deaktiviert. Erst die anschließende Feinbearbeitung
   blendet kleine Eckpunktgriffe ein; das Gizmo erscheint nur für den gewählten Griff.

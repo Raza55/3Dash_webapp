@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Activity, Box, BrickWall, Crosshair, Eraser, House, Image as ImageIcon, ImageOff, LampCeiling, MapPin, Minus, Monitor, Move3d, PanelTopClose, Plus, Rotate3d, Scale3d, Square, Trash2, Cpu } from 'lucide-react';
+import { Activity, Box, BrickWall, Crosshair, Eraser, House, Image as ImageIcon, ImageOff, LampCeiling, MapPin, Minus, Monitor, Move3d, PanelTopClose, Plus, Rotate3d, Scale3d, Scissors, Square, Trash2, Cpu } from 'lucide-react';
 import { generateUUID } from '../../utils/uuid';
 import {
   Vector3,
@@ -92,6 +92,11 @@ import {
 import { traceRoomPolygon } from '../../babylon/RoomPolygonTracer';
 import { createSceneScaleRoot, getModelScale, worldToConfigPosition } from '../../babylon/SceneScale';
 import { sceneRelativeDefaults, type SceneRelativeDefaults } from '../../utils/editorControls';
+import {
+  keepAvailableDetectedRoomPart,
+  roomZonePointBounds,
+  splitRoomZoneByLine,
+} from '../../utils/roomZoneBoolean';
 import { useTranslation } from '../../contexts/LanguageContext';
 import GuidedTour from '../../components/GuidedTour/GuidedTour';
 import { editorTourSteps } from '../../components/GuidedTour/tourSteps';
@@ -346,6 +351,8 @@ export default function ConfigEditor() {
   const roomPreviewVirtualWallHandlesRef = useRef<Mesh[]>([]);
   const roomVirtualWallDraftLineRef = useRef<LinesMesh | null>(null);
   const roomVirtualWallDraftHandlesRef = useRef<Mesh[]>([]);
+  const roomSplitDraftLineRef = useRef<LinesMesh | null>(null);
+  const roomSplitDraftHandlesRef = useRef<Mesh[]>([]);
   const tubeAnchorRef = useRef<Mesh | null>(null);
 
   const [haEntities, setHaEntities] = useState<HAEntityOption[]>(() => getEntityCache());
@@ -464,6 +471,9 @@ export default function ConfigEditor() {
   const [roomSelectedVirtualWallEndpoint, setRoomSelectedVirtualWallEndpoint] = useState<RoomVirtualWallEndpoint | null>(null);
   const [roomVirtualWallDrawing, setRoomVirtualWallDrawing] = useState(false);
   const [roomVirtualWallStartSet, setRoomVirtualWallStartSet] = useState(false);
+  const [roomSplitDrawing, setRoomSplitDrawing] = useState(false);
+  const [roomSplitStartSet, setRoomSplitStartSet] = useState(false);
+  const [roomSplitPieces, setRoomSplitPieces] = useState<RoomZonePoint[][]>([]);
   const [roomPointCount, setRoomPointCount] = useState(4);
   const [roomGizmoActive, setRoomGizmoActive] = useState(false);
   const [roomOverlapNames, setRoomOverlapNames] = useState<string[]>([]);
@@ -479,8 +489,14 @@ export default function ConfigEditor() {
   roomSelectedVirtualWallEndpointRef.current = roomSelectedVirtualWallEndpoint;
   const roomVirtualWallDrawingRef = useRef(roomVirtualWallDrawing);
   roomVirtualWallDrawingRef.current = roomVirtualWallDrawing;
+  const roomSplitDrawingRef = useRef(roomSplitDrawing);
+  roomSplitDrawingRef.current = roomSplitDrawing;
+  const roomSplitPiecesRef = useRef(roomSplitPieces);
+  roomSplitPiecesRef.current = roomSplitPieces;
   const roomVirtualWallDraftStartRef = useRef<RoomZonePoint | null>(null);
   const roomVirtualWallDraftEndRef = useRef<RoomZonePoint | null>(null);
+  const roomSplitDraftStartRef = useRef<RoomZonePoint | null>(null);
+  const roomSplitDraftEndRef = useRef<RoomZonePoint | null>(null);
   const roomPreviewInfoRef = useRef<RoomPreviewInfo>({
     name: '',
     size: { width: editorDefaultSizes.wall.width, height: 0.025, depth: editorDefaultSizes.wall.depth },
@@ -490,6 +506,7 @@ export default function ConfigEditor() {
   });
   const handleCloseRoomPanelRef = useRef<() => void>(() => {});
   const handleCancelRoomVirtualWallDrawingRef = useRef<() => void>(() => {});
+  const handleCancelRoomSplitRef = useRef<() => void>(() => {});
 
   const overlappingRoomIds = useMemo(() => findOverlappingRoomIds(rooms), [rooms]);
 
@@ -1427,6 +1444,37 @@ export default function ConfigEditor() {
       outline.color = overlapping ? new Color3(1, 0.24, 0.3) : new Color3(0.25, 0.82, 1);
     };
 
+    const splitPieceColors = [
+      { diffuse: new Color3(0.04, 0.65, 0.72), emissive: new Color3(0.02, 0.34, 0.4) },
+      { diffuse: new Color3(0.95, 0.52, 0.12), emissive: new Color3(0.48, 0.2, 0.02) },
+      { diffuse: new Color3(0.45, 0.72, 0.18), emissive: new Color3(0.2, 0.36, 0.04) },
+    ];
+    roomSplitPiecesRef.current.forEach((piece, pieceIndex) => {
+      const pieceMesh = createRoomZoneSurface(
+        scene,
+        `room-preview-split-piece-${pieceIndex}`,
+        piece,
+        height + 0.008,
+      );
+      pieceMesh.parent = root;
+      pieceMesh.metadata = {
+        previewTarget: 'roomSplitPiece',
+        roomEditorTarget: 'splitPiece',
+        roomSplitPieceIndex: pieceIndex,
+      };
+      pieceMesh.isPickable = true;
+      pieceMesh.renderingGroupId = 2;
+      const color = splitPieceColors[pieceIndex % splitPieceColors.length];
+      const material = new StandardMaterial(`room-preview-split-piece-material-${pieceIndex}`, scene);
+      material.diffuseColor = color.diffuse;
+      material.emissiveColor = color.emissive;
+      material.alpha = 0.46;
+      material.disableLighting = true;
+      material.disableDepthWrite = true;
+      material.backFaceCulling = false;
+      pieceMesh.material = material;
+    });
+
     const selectedVirtualWallEndpoint = roomSelectedVirtualWallEndpointRef.current
       && roomSelectedVirtualWallEndpointRef.current.wallIndex < info.virtualWalls.length
       ? roomSelectedVirtualWallEndpointRef.current
@@ -1742,8 +1790,59 @@ export default function ConfigEditor() {
     roomVirtualWallDraftHandlesRef.current[1]?.position.set(end.x, height, end.z);
   }, []);
 
+  const clearRoomSplitDraft = useCallback(() => {
+    roomSplitDraftLineRef.current?.dispose();
+    roomSplitDraftLineRef.current = null;
+    for (const handle of roomSplitDraftHandlesRef.current) handle.dispose(false, true);
+    roomSplitDraftHandlesRef.current = [];
+  }, []);
+
+  const updateRoomSplitDraft = useCallback((start: RoomZonePoint, end: RoomZonePoint) => {
+    const scene = sceneCtxRef.current?.scene;
+    const root = roomPreviewRootRef.current;
+    if (!scene || !root) return;
+    const height = Math.max(0.012, roomPreviewInfoRef.current.size.height) + 0.022;
+    const path = [new Vector3(start.x, height, start.z), new Vector3(end.x, height, end.z)];
+    if (roomSplitDraftLineRef.current) {
+      MeshBuilder.CreateLines(roomSplitDraftLineRef.current.name, {
+        points: path,
+        instance: roomSplitDraftLineRef.current,
+      }, scene);
+    } else {
+      const line = MeshBuilder.CreateLines('room-split-draft', { points: path }, scene);
+      line.parent = root;
+      line.color = new Color3(0.72, 0.36, 1);
+      line.alpha = 1;
+      line.isPickable = false;
+      line.renderingGroupId = 2;
+      roomSplitDraftLineRef.current = line;
+      roomSplitDraftHandlesRef.current = (['start', 'end'] as const).map((endpoint) => {
+        const handle = MeshBuilder.CreateSphere(`room-split-draft-${endpoint}`, {
+          diameter: 0.048,
+          segments: 10,
+        }, scene);
+        handle.parent = root;
+        handle.isPickable = false;
+        const material = new StandardMaterial(`room-split-draft-${endpoint}-material`, scene);
+        material.diffuseColor = new Color3(0.72, 0.36, 1);
+        material.emissiveColor = new Color3(0.34, 0.08, 0.55);
+        material.disableLighting = true;
+        material.disableDepthWrite = true;
+        handle.material = material;
+        handle.renderingGroupId = 2;
+        return handle;
+      });
+    }
+    roomSplitDraftHandlesRef.current[0]?.position.set(start.x, height, start.z);
+    roomSplitDraftHandlesRef.current[1]?.position.set(end.x, height, end.z);
+  }, []);
+
   // Placing mode
   const enterPlacingMode = useCallback(() => {
+    if (roomPanelOpenRef.current) {
+      handleCancelRoomVirtualWallDrawingRef.current();
+      handleCancelRoomSplitRef.current();
+    }
     setPlacingMode(true);
     const ctx = sceneCtxRef.current;
     if (ctx) {
@@ -1791,6 +1890,31 @@ export default function ConfigEditor() {
     }
   }, [clearRoomVirtualWallDraft]);
   handleCancelRoomVirtualWallDrawingRef.current = cancelRoomVirtualWallDrawing;
+
+  const cancelRoomSplit = useCallback(() => {
+    if (canvasRef.current?.dataset.roomSplitDrawing === 'true') {
+      delete canvasRef.current.dataset.roomSplitDrawing;
+    }
+    roomSplitDrawingRef.current = false;
+    roomSplitDraftStartRef.current = null;
+    roomSplitDraftEndRef.current = null;
+    roomSplitPiecesRef.current = [];
+    setRoomSplitDrawing(false);
+    setRoomSplitStartSet(false);
+    setRoomSplitPieces([]);
+    clearRoomSplitDraft();
+    const ctx = sceneCtxRef.current;
+    if (ctx && canvasRef.current) {
+      ctx.camera.inputs.addPointers();
+      applyCameraControlSensitivity(ctx.camera);
+      ctx.camera.attachControl(canvasRef.current, true);
+      canvasRef.current.style.cursor = 'default';
+    }
+    if (roomPanelOpenRef.current && roomZoneReadyRef.current) {
+      updateRoomPreview(positionRef.current, roomPreviewInfoRef.current);
+    }
+  }, [clearRoomSplitDraft, updateRoomPreview]);
+  handleCancelRoomSplitRef.current = cancelRoomSplit;
 
   const recenterView = useCallback(() => {
     const ctx = sceneCtxRef.current;
@@ -1957,14 +2081,105 @@ export default function ConfigEditor() {
 
     // Pointer move — coordinate readout
     let hoveredRoomId: string | null = null;
+    let pointerDownPos: { x: number; y: number } | null = null;
+    const DRAG_THRESHOLD = 6; // pixels — beyond this it's a rotation, not a click
+    const pickRoomSplitPoint = (offsetX: number, offsetY: number): Vector3 | null => {
+      const modelPick = ctx.scene.pick(
+        offsetX,
+        offsetY,
+        (mesh) => modelMeshesRef.current.includes(mesh),
+      );
+      if (modelPick?.hit && modelPick.pickedPoint) return modelPick.pickedPoint;
+      const zonePick = ctx.scene.pick(
+        offsetX,
+        offsetY,
+        (mesh) => mesh.metadata?.previewTarget === 'roomZone',
+      );
+      return zonePick?.hit && zonePick.pickedPoint ? zonePick.pickedPoint : null;
+    };
+
+    const handleRoomSplitPointerMove = (event: PointerEvent) => {
+      if (canvas.dataset.roomSplitDrawing !== 'true' || !roomSplitDraftStartRef.current) return;
+      const splitPoint = pickRoomSplitPoint(event.offsetX, event.offsetY);
+      if (!splitPoint) return;
+      const localEnd = worldPointToRoomLocal(
+        splitPoint,
+        positionRef.current,
+        roomPreviewInfoRef.current.rotation.y,
+        modelScaleRef.current,
+      );
+      roomSplitDraftEndRef.current = localEnd;
+      updateRoomSplitDraft(roomSplitDraftStartRef.current, localEnd);
+    };
+
+    const handleRoomSplitPointerDown = (event: PointerEvent) => {
+      if (canvas.dataset.roomSplitDrawing !== 'true') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      pointerDownPos = null;
+      const splitPoint = pickRoomSplitPoint(event.offsetX, event.offsetY);
+      if (!splitPoint) return;
+      const localPoint = worldPointToRoomLocal(
+        splitPoint,
+        positionRef.current,
+        roomPreviewInfoRef.current.rotation.y,
+        modelScaleRef.current,
+      );
+      const start = roomSplitDraftStartRef.current;
+      if (!start) {
+        roomSplitDraftStartRef.current = localPoint;
+        roomSplitDraftEndRef.current = localPoint;
+        setRoomSplitStartSet(true);
+        updateRoomSplitDraft(localPoint, localPoint);
+        showToast(t('rooms.splitEnd'));
+        return;
+      }
+
+      const pieces = splitRoomZoneByLine(roomPreviewInfoRef.current.points, start, localPoint);
+      if (pieces.length < 2) {
+        roomSplitDraftStartRef.current = null;
+        roomSplitDraftEndRef.current = null;
+        setRoomSplitStartSet(false);
+        clearRoomSplitDraft();
+        showToast(t('rooms.splitMisses'));
+        return;
+      }
+
+      roomSplitPiecesRef.current = pieces;
+      setRoomSplitPieces(pieces);
+      delete canvas.dataset.roomSplitDrawing;
+      roomSplitDrawingRef.current = false;
+      setRoomSplitDrawing(false);
+      roomSplitDraftStartRef.current = null;
+      roomSplitDraftEndRef.current = null;
+      setRoomSplitStartSet(false);
+      clearRoomSplitDraft();
+      roomSelectedPointRef.current = null;
+      setRoomSelectedPoint(null);
+      roomSelectedVirtualWallRef.current = null;
+      setRoomSelectedVirtualWall(null);
+      roomSelectedVirtualWallEndpointRef.current = null;
+      setRoomSelectedVirtualWallEndpoint(null);
+      roomGizmoActiveRef.current = false;
+      setRoomGizmoActive(false);
+      ctx.camera.inputs.addPointers();
+      applyCameraControlSensitivity(ctx.camera);
+      ctx.camera.attachControl(canvas, true);
+      canvas.style.cursor = 'pointer';
+      updateRoomPreview(positionRef.current, roomPreviewInfoRef.current);
+      showToast(t('rooms.splitChoose'));
+    };
+    canvas.addEventListener('pointermove', handleRoomSplitPointerMove, true);
+    canvas.addEventListener('pointerdown', handleRoomSplitPointerDown, true);
+
     ctx.scene.onPointerMove = (evt, pick) => {
       if (pick.hit && pick.pickedPoint) {
         const p = worldToConfigPosition(pick.pickedPoint, modelScaleRef.current);
         setCoordText(`x: ${p.x.toFixed(2)}  z: ${p.y.toFixed(2)}  y: ${p.z.toFixed(2)}`);
-        if ((placingModeRef.current || roomVirtualWallDrawingRef.current) && canvas) canvas.style.cursor = 'crosshair';
+        if ((placingModeRef.current || roomVirtualWallDrawingRef.current || roomSplitDrawingRef.current) && canvas) canvas.style.cursor = 'crosshair';
       } else {
         setCoordText(t('editor.coordEmpty'));
-        if (!placingModeRef.current && !roomVirtualWallDrawingRef.current && canvas) canvas.style.cursor = 'default';
+        if (!placingModeRef.current && !roomVirtualWallDrawingRef.current && !roomSplitDrawingRef.current && canvas) canvas.style.cursor = 'default';
       }
 
       if (roomVirtualWallDrawingRef.current && roomVirtualWallDraftStartRef.current) {
@@ -2000,12 +2215,8 @@ export default function ConfigEditor() {
         hoveredRoomId = nextRoomId;
         setRoomZoneLabelVisibility(roomZoneMeshMapRef.current, hoveredRoomId);
       }
-      if (!placingModeRef.current && canvas && hoveredRoomId) canvas.style.cursor = 'pointer';
+      if (!placingModeRef.current && !roomVirtualWallDrawingRef.current && !roomSplitDrawingRef.current && canvas && hoveredRoomId) canvas.style.cursor = 'pointer';
     };
-
-    // Track pointer start position to distinguish clicks from drags
-    let pointerDownPos: { x: number; y: number } | null = null;
-    const DRAG_THRESHOLD = 6; // pixels — beyond this it's a rotation, not a click
 
     // Click to place or click light/display mesh to edit
     ctx.scene.onPointerDown = (evt, pick) => {
@@ -2086,9 +2297,10 @@ export default function ConfigEditor() {
           const editedRoomId = roomEditIdxRef.current === null
             ? null
             : roomsRef.current[roomEditIdxRef.current]?.id ?? null;
-          const neighboringBoundaryWalls = roomsRef.current
+          const neighboringRooms = roomsRef.current
             .filter((room) => room.id !== editedRoomId
-              && Math.abs(room.anchor.y - p.y) <= ROOM_FLOOR_TOLERANCE)
+              && Math.abs(room.anchor.y - p.y) <= ROOM_FLOOR_TOLERANCE);
+          const neighboringBoundaryWalls = neighboringRooms
             .flatMap((room) => roomBoundaryWallsToWorld(room, modelScaleRef.current));
           const trace = traceRoomPolygon(
             ctx.scene,
@@ -2111,6 +2323,13 @@ export default function ConfigEditor() {
             y: snappedFloorPosition.y,
             z: snappedFloorPosition.z,
           };
+          const availableZone = keepAvailableDetectedRoomPart(trace.points, newPos, neighboringRooms);
+          if (!availableZone) {
+            showToast(t('rooms.traceOccupied'));
+            pointerDownPos = null;
+            return;
+          }
+          const detectedSize = roomZonePointBounds(availableZone.points);
           const rebasedVirtualWalls = ownWorldVirtualWalls.map((wall) => ({
             start: {
               x: roundValue(wall.start.x / modelScaleRef.current - newPos.x),
@@ -2123,25 +2342,30 @@ export default function ConfigEditor() {
           }));
           const nextInfo: RoomPreviewInfo = {
             name: currentInfo.name,
-            size: { ...currentInfo.size, width: trace.width, depth: trace.depth },
+            size: { ...currentInfo.size, width: detectedSize.width, depth: detectedSize.depth },
             rotation: { x: 0, y: 0, z: 0 },
-            points: trace.points,
+            points: availableZone.points,
             virtualWalls: rebasedVirtualWalls,
           };
           setPosition(newPos);
           positionRef.current = newPos;
           roomPreviewInfoRef.current = nextInfo;
-          roomFormRef.current?.applyDetectedPolygon(trace.points);
+          roomFormRef.current?.applyDetectedPolygon(availableZone.points);
           roomFormRef.current?.setVirtualWalls(rebasedVirtualWalls);
           setRoomZoneReady(true);
           roomZoneReadyRef.current = true;
-          setRoomPointCount(trace.points.length);
+          setRoomPointCount(availableZone.points.length);
           roomSelectedPointRef.current = null;
           setRoomSelectedPoint(null);
           roomGizmoActiveRef.current = false;
           setRoomGizmoActive(false);
           updateRoomPreview(newPos, nextInfo);
-          showToast(t(trace.usedFallback ? 'rooms.traceFallback' : 'rooms.traceSuccess', { count: trace.points.length }));
+          showToast(t(
+            availableZone.removedOverlap
+              ? 'rooms.traceClipped'
+              : trace.usedFallback ? 'rooms.traceFallback' : 'rooms.traceSuccess',
+            { count: availableZone.points.length },
+          ));
         // Display placing mode: capture normal
         } else if (displayPanelOpenRef.current) {
           const faceNormal = placePick.getNormal(true, true);
@@ -2243,6 +2467,36 @@ export default function ConfigEditor() {
         );
         if (roomPick?.hit && roomPick.pickedMesh) {
           const metadata = roomPick.pickedMesh.metadata;
+          if (metadata.roomEditorTarget === 'splitPiece') {
+            const piece = roomSplitPiecesRef.current[Number(metadata.roomSplitPieceIndex)];
+            if (piece?.length >= 3) {
+              const bounds = roomZonePointBounds(piece);
+              const nextInfo: RoomPreviewInfo = {
+                ...roomPreviewInfoRef.current,
+                size: {
+                  ...roomPreviewInfoRef.current.size,
+                  width: bounds.width,
+                  depth: bounds.depth,
+                },
+                points: piece.map((point) => ({ ...point })),
+              };
+              roomSplitPiecesRef.current = [];
+              setRoomSplitPieces([]);
+              roomPreviewInfoRef.current = nextInfo;
+              roomFormRef.current?.applySplitPolygon(piece);
+              roomSelectedPointRef.current = null;
+              setRoomSelectedPoint(null);
+              roomSelectedVirtualWallRef.current = null;
+              setRoomSelectedVirtualWall(null);
+              roomSelectedVirtualWallEndpointRef.current = null;
+              setRoomSelectedVirtualWallEndpoint(null);
+              roomGizmoActiveRef.current = false;
+              setRoomGizmoActive(false);
+              updateRoomPreview(positionRef.current, nextInfo);
+              showToast(t('rooms.splitAssigned'));
+            }
+            return;
+          }
           const pointIndex = metadata.roomEditorTarget === 'point'
             ? Number(metadata.roomPointIndex)
             : null;
@@ -2350,6 +2604,8 @@ export default function ConfigEditor() {
 
     return () => {
       disposed = true;
+      canvas.removeEventListener('pointermove', handleRoomSplitPointerMove, true);
+      canvas.removeEventListener('pointerdown', handleRoomSplitPointerDown, true);
       Object.keys(meshMapRef.current).forEach((id) =>
         removeLightMesh(meshMapRef.current, id),
       );
@@ -2498,6 +2754,11 @@ export default function ConfigEditor() {
         return;
       }
       if (e.key === 'Escape') {
+        if (roomSplitDrawingRef.current || roomSplitPiecesRef.current.length) {
+          e.preventDefault();
+          handleCancelRoomSplitRef.current();
+          return;
+        }
         if (roomVirtualWallDrawingRef.current) {
           e.preventDefault();
           handleCancelRoomVirtualWallDrawingRef.current();
@@ -3518,6 +3779,8 @@ export default function ConfigEditor() {
   // --- Room handlers ---
 
   const handleAddRoom = useCallback((area?: HAAreaRegistryEntry) => {
+    handleCancelRoomVirtualWallDrawingRef.current();
+    handleCancelRoomSplitRef.current();
     const anchor = { x: 0, y: 0, z: 0 };
     const initialPoints = rectangleRoomZonePoints(editorDefaultSizes.wall.width, editorDefaultSizes.wall.depth);
     const draft: RoomConfig = {
@@ -3565,6 +3828,8 @@ export default function ConfigEditor() {
   const handleEditRoom = useCallback((idx: number) => {
     const room = rooms[idx];
     if (!room) return;
+    handleCancelRoomVirtualWallDrawingRef.current();
+    handleCancelRoomSplitRef.current();
     roomPreviewInfoRef.current = {
       name: room.name,
       size: {
@@ -3629,6 +3894,7 @@ export default function ConfigEditor() {
 
   const handleCloseRoomPanel = useCallback(() => {
     handleCancelRoomVirtualWallDrawingRef.current();
+    handleCancelRoomSplitRef.current();
     setRoomPanelOpen(false);
     setRoomEditIdx(null);
     roomEditIdxRef.current = null;
@@ -3696,6 +3962,7 @@ export default function ConfigEditor() {
   }, []);
 
   const handleResetRoomPoints = useCallback(() => {
+    handleCancelRoomSplitRef.current();
     roomFormRef.current?.resetPoints();
     roomSelectedPointRef.current = null;
     setRoomSelectedPoint(null);
@@ -3712,6 +3979,7 @@ export default function ConfigEditor() {
       cancelRoomVirtualWallDrawing();
       return;
     }
+    handleCancelRoomSplitRef.current();
     exitPlacingMode();
     roomVirtualWallDrawingRef.current = true;
     roomVirtualWallDraftStartRef.current = null;
@@ -3734,6 +4002,38 @@ export default function ConfigEditor() {
     }
     showToast(t('rooms.virtualWallStart'));
   }, [cancelRoomVirtualWallDrawing, exitPlacingMode, showToast, t, updateRoomPreview]);
+
+  const handleToggleRoomSplit = useCallback(() => {
+    if (roomSplitDrawingRef.current || roomSplitPiecesRef.current.length) {
+      cancelRoomSplit();
+      return;
+    }
+    handleCancelRoomVirtualWallDrawingRef.current();
+    exitPlacingMode();
+    if (canvasRef.current) canvasRef.current.dataset.roomSplitDrawing = 'true';
+    roomSplitDrawingRef.current = true;
+    roomSplitDraftStartRef.current = null;
+    roomSplitDraftEndRef.current = null;
+    roomSplitPiecesRef.current = [];
+    setRoomSplitDrawing(true);
+    setRoomSplitStartSet(false);
+    setRoomSplitPieces([]);
+    roomSelectedPointRef.current = null;
+    setRoomSelectedPoint(null);
+    roomSelectedVirtualWallRef.current = null;
+    setRoomSelectedVirtualWall(null);
+    roomSelectedVirtualWallEndpointRef.current = null;
+    setRoomSelectedVirtualWallEndpoint(null);
+    roomGizmoActiveRef.current = false;
+    setRoomGizmoActive(false);
+    updateRoomPreview(positionRef.current, roomPreviewInfoRef.current);
+    const ctx = sceneCtxRef.current;
+    if (ctx) {
+      ctx.camera.inputs.removeByType('ArcRotateCameraPointersInput');
+      if (canvasRef.current) canvasRef.current.style.cursor = 'crosshair';
+    }
+    showToast(t('rooms.splitStart'));
+  }, [cancelRoomSplit, exitPlacingMode, showToast, t, updateRoomPreview]);
 
   const handleRemoveRoomVirtualWall = useCallback(() => {
     const wallIndex = roomSelectedVirtualWallRef.current;
@@ -3778,7 +4078,7 @@ export default function ConfigEditor() {
     if (draggingGizmoRef.current) return;
     const info = roomPreviewInfoRef.current;
     updateRoomPreview(position, info);
-  }, [position, roomGizmoActive, roomPanelOpen, roomSelectedPoint, roomSelectedVirtualWall, roomSelectedVirtualWallEndpoint, roomZoneReady, transformMode, updateRoomPreview]);
+  }, [position, roomGizmoActive, roomPanelOpen, roomSelectedPoint, roomSelectedVirtualWall, roomSelectedVirtualWallEndpoint, roomSplitPieces, roomZoneReady, transformMode, updateRoomPreview]);
 
   // ── Tube handlers ──────────────────────────────────────────────
 
@@ -4375,9 +4675,13 @@ export default function ConfigEditor() {
       {/* 3D Canvas */}
       <div className={`canvas-area editor-canvas${panelOpen || displayPanelOpen || blindPanelOpen || wallPanelOpen || smartDevicePanelOpen || tubePanelOpen || roomPanelOpen ? ' form-open' : ''}`}>
         <canvas ref={canvasRef} />
-        <div className={`mode-banner${placingMode || roomVirtualWallDrawing ? ' visible' : ''}`}>
-          {roomVirtualWallDrawing
-            ? t(roomVirtualWallStartSet ? 'rooms.virtualWallEnd' : 'rooms.virtualWallStart')
+        <div className={`mode-banner${placingMode || roomVirtualWallDrawing || roomSplitDrawing || roomSplitPieces.length ? ' visible' : ''}`}>
+          {roomSplitPieces.length
+            ? t('rooms.splitChoose')
+            : roomSplitDrawing
+              ? t(roomSplitStartSet ? 'rooms.splitEnd' : 'rooms.splitStart')
+              : roomVirtualWallDrawing
+                ? t(roomVirtualWallStartSet ? 'rooms.virtualWallEnd' : 'rooms.virtualWallStart')
             : displayPanelOpen ? t('editor.placeDisplayBanner') : blindPanelOpen ? t('editor.placeBlindBanner') : wallPanelOpen ? t('editor.placeWallBanner') : smartDevicePanelOpen ? t('editor.placeSmartDeviceBanner') : roomPanelOpen ? t('editor.placeRoomBanner') : t('editor.placeLightBanner')}
         </div>
         {(!roomPanelOpen || roomZoneReady) && (
@@ -4452,6 +4756,15 @@ export default function ConfigEditor() {
               title={t('rooms.removeVirtualWall')}
             >
               <Eraser size={15} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+            <button
+              className={`editor-view-tool-btn${roomSplitDrawing || roomSplitPieces.length ? ' active' : ''}`}
+              onClick={handleToggleRoomSplit}
+              aria-label={t(roomSplitDrawing || roomSplitPieces.length ? 'rooms.cancelSplit' : 'rooms.splitZone')}
+              aria-pressed={roomSplitDrawing || roomSplitPieces.length > 0}
+              title={t(roomSplitDrawing || roomSplitPieces.length ? 'rooms.cancelSplit' : 'rooms.splitZone')}
+            >
+              <Scissors size={15} strokeWidth={1.8} aria-hidden="true" />
             </button>
             <span className="editor-room-point-count" aria-label={t('rooms.pointsCount', { count: roomPointCount })}>
               {roomPointCount}

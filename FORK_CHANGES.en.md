@@ -98,6 +98,13 @@ are used.
 - In Rooms mode, all saved neighboring rooms remain visible while another area is being
   edited or detected. Polygon edges on the same floor automatically act as finite virtual
   partitions during detection without being copied into the new room as manual walls.
+- Automatic detection geometrically subtracts already assigned room areas on the same
+  floor and keeps the available component at the clicked floor point. If no non-overlapping
+  component can be represented as a simple polygon there, detection is rejected instead
+  of creating an overlap.
+- A scissors tool splits an existing room area directly in the 3D view: two floor points
+  define the cut line, then the user clicks the part that should remain assigned to the
+  current room. The other parts become unassigned and can be detected for another room.
 - Until an outline has been detected, transform tools and saving remain hidden or
   disabled. Fine editing then shows small corner handles, while the gizmo appears only
   for the selected handle.
