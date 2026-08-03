@@ -81,9 +81,12 @@ are used.
   outlines. Corner points can be selected, moved, added, and removed directly in the
   3D view, and a reset action restores a rectangle.
 - New rooms start without a pre-rendered area. A click on a clear floor spot is first
-  projected onto a broad horizontal floor surface. The boundary then uses only tall,
-  vertical wall hits that remain consistent across five probe heights, largely
-  ignoring low or compact furniture.
+  projected onto a broad horizontal floor surface. When the imported model provides a
+  separate floor mesh, its real triangle boundary is preferred as the room polygon.
+  This keeps rooms separated at open doorways when their floor materials are distinct.
+  Models without separate floor surfaces retain the fallback based on tall, vertical
+  wall hits that remain consistent across five probe heights, largely ignoring low or
+  compact furniture.
 - Until an outline has been detected, transform tools and saving remain hidden or
   disabled. Fine editing then shows small corner handles, while the gizmo appears only
   for the selected handle.

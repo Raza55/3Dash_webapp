@@ -1,4 +1,4 @@
-import { Ray, Vector3, type AbstractMesh, type PickingInfo, type Scene } from '@babylonjs/core';
+import { Ray, Vector3, VertexBuffer, type AbstractMesh, type PickingInfo, type Scene } from '@babylonjs/core';
 import type { RoomZonePoint } from '../types';
 
 export interface RoomPolygonTraceResult {
@@ -31,6 +31,17 @@ interface ModelBounds {
 interface FloorCandidate {
   y: number;
   surfaceBonus: number;
+  mesh: AbstractMesh | null;
+}
+
+interface FloorSurface {
+  y: number;
+  mesh: AbstractMesh | null;
+}
+
+interface BoundaryEdge {
+  a: string;
+  b: string;
 }
 
 interface WallHit {
@@ -249,6 +260,9 @@ function mergeFloorCandidate(candidates: FloorCandidate[], candidate: FloorCandi
   const existing = candidates.find((entry) => Math.abs(entry.y - candidate.y) <= tolerance);
   if (existing) {
     existing.y = (existing.y + candidate.y) / 2;
+    if (candidate.surfaceBonus >= existing.surfaceBonus && candidate.mesh) {
+      existing.mesh = candidate.mesh;
+    }
     existing.surfaceBonus = Math.max(existing.surfaceBonus, candidate.surfaceBonus);
     return;
   }
@@ -288,18 +302,18 @@ function floorSurfaceSupport(
   return supported / offsets.length;
 }
 
-function findFloorY(
+function findFloorSurface(
   scene: Scene,
   clickedPoint: Vector3,
   modelMeshes: AbstractMesh[],
   modelMeshSet: Set<AbstractMesh>,
   diagonal: number,
-): number {
+): FloorSurface {
   const bounds = modelBounds(modelMeshes);
   const verticalSpan = Math.max(diagonal * 0.03, bounds.max.y - bounds.min.y);
   const maxDrop = clamp(verticalSpan * 0.65, diagonal * 0.035, diagonal * 0.14);
   const tolerance = diagonal * 0.003;
-  const candidates: FloorCandidate[] = [{ y: clickedPoint.y, surfaceBonus: 0 }];
+  const candidates: FloorCandidate[] = [{ y: clickedPoint.y, surfaceBonus: 0, mesh: null }];
   const ray = new Ray(
     new Vector3(clickedPoint.x, bounds.max.y + diagonal * 0.02, clickedPoint.z),
     Vector3.Down(),
@@ -315,10 +329,12 @@ function findFloorY(
     mergeFloorCandidate(candidates, {
       y: point.y,
       surfaceBonus: horizontalFootprintBonus(mesh, diagonal),
+      mesh,
     }, tolerance);
   }
 
   let bestY = clickedPoint.y;
+  let bestMesh: AbstractMesh | null = null;
   let bestScore = -Infinity;
   for (const candidate of candidates) {
     const support = floorSurfaceSupport(
@@ -334,9 +350,179 @@ function findFloorY(
     if (score > bestScore) {
       bestScore = score;
       bestY = candidate.y;
+      bestMesh = candidate.mesh;
     }
   }
-  return bestY;
+  return { y: bestY, mesh: bestMesh };
+}
+
+function vertexKey(point: Point2, precision: number): string {
+  return `${Math.round(point.x / precision)}:${Math.round(point.z / precision)}`;
+}
+
+function edgeKey(a: string, b: string): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+function polygonArea(points: Point2[]): number {
+  let area = 0;
+  for (let index = 0; index < points.length; index++) {
+    const current = points[index];
+    const next = points[(index + 1) % points.length];
+    area += current.x * next.z - next.x * current.z;
+  }
+  return area / 2;
+}
+
+function pointInPolygon(point: Point2, polygon: Point2[]): boolean {
+  let inside = false;
+  for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current++) {
+    const a = polygon[current];
+    const b = polygon[previous];
+    const crosses = (a.z > point.z) !== (b.z > point.z)
+      && point.x < ((b.x - a.x) * (point.z - a.z)) / (b.z - a.z) + a.x;
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+function boundaryLoops(
+  edges: BoundaryEdge[],
+  pointsByKey: Map<string, Point2>,
+): Point2[][] {
+  const adjacency = new Map<string, Set<string>>();
+  const unused = new Set<string>();
+  for (const edge of edges) {
+    if (!adjacency.has(edge.a)) adjacency.set(edge.a, new Set());
+    if (!adjacency.has(edge.b)) adjacency.set(edge.b, new Set());
+    adjacency.get(edge.a)!.add(edge.b);
+    adjacency.get(edge.b)!.add(edge.a);
+    unused.add(edgeKey(edge.a, edge.b));
+  }
+
+  const loops: Point2[][] = [];
+  for (const edge of edges) {
+    const firstEdgeKey = edgeKey(edge.a, edge.b);
+    if (!unused.has(firstEdgeKey)) continue;
+    unused.delete(firstEdgeKey);
+    const loopKeys = [edge.a];
+    let previous = edge.a;
+    let current = edge.b;
+    let closed = false;
+
+    for (let guard = 0; guard <= edges.length; guard++) {
+      if (current === loopKeys[0]) {
+        closed = true;
+        break;
+      }
+      loopKeys.push(current);
+      const next = [...(adjacency.get(current) ?? [])].find((candidate) =>
+        candidate !== previous && unused.has(edgeKey(current, candidate)));
+      if (!next) break;
+      unused.delete(edgeKey(current, next));
+      previous = current;
+      current = next;
+    }
+
+    if (!closed || loopKeys.length < 3) continue;
+    const loop = loopKeys
+      .map((key) => pointsByKey.get(key))
+      .filter((point): point is Point2 => Boolean(point));
+    if (loop.length >= 3) loops.push(loop);
+  }
+  return loops;
+}
+
+function traceFloorMeshBoundary(
+  mesh: AbstractMesh,
+  clickedPoint: Vector3,
+  floorY: number,
+  diagonal: number,
+  scale: number,
+): RoomPolygonTraceResult | null {
+  const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
+  const indices = mesh.getIndices();
+  if (!positions || !indices || indices.length < 3) return null;
+
+  const worldMatrix = mesh.computeWorldMatrix(true);
+  const heightTolerance = diagonal * 0.004;
+  const keyPrecision = diagonal * 0.00025;
+  const edgeRecords = new Map<string, { count: number; edge: BoundaryEdge }>();
+  const pointsByKey = new Map<string, Point2>();
+
+  const worldVertex = (index: number) => Vector3.TransformCoordinates(
+    new Vector3(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]),
+    worldMatrix,
+  );
+  const addEdge = (start: Vector3, end: Vector3) => {
+    const start2 = { x: start.x, z: start.z };
+    const end2 = { x: end.x, z: end.z };
+    const a = vertexKey(start2, keyPrecision);
+    const b = vertexKey(end2, keyPrecision);
+    if (a === b) return;
+    pointsByKey.set(a, start2);
+    pointsByKey.set(b, end2);
+    const key = edgeKey(a, b);
+    const existing = edgeRecords.get(key);
+    if (existing) existing.count++;
+    else edgeRecords.set(key, { count: 1, edge: { a, b } });
+  };
+
+  for (let offset = 0; offset + 2 < indices.length; offset += 3) {
+    const a = worldVertex(Number(indices[offset]));
+    const b = worldVertex(Number(indices[offset + 1]));
+    const c = worldVertex(Number(indices[offset + 2]));
+    const minimumY = Math.min(a.y, b.y, c.y);
+    const maximumY = Math.max(a.y, b.y, c.y);
+    if (maximumY - minimumY > heightTolerance || Math.abs((minimumY + maximumY) / 2 - floorY) > heightTolerance) continue;
+    const normal = Vector3.Cross(b.subtract(a), c.subtract(a));
+    if (normal.lengthSquared() <= 1e-12 || Math.abs(normal.normalize().y) < 0.82) continue;
+    addEdge(a, b);
+    addEdge(b, c);
+    addEdge(c, a);
+  }
+
+  const edges = [...edgeRecords.values()]
+    .filter((record) => record.count === 1)
+    .map((record) => record.edge);
+  if (edges.length < 3) return null;
+
+  const clicked2 = { x: clickedPoint.x, z: clickedPoint.z };
+  const containingLoops = boundaryLoops(edges, pointsByKey)
+    .filter((loop) => pointInPolygon(clicked2, loop)
+      || loop.some((point, index) => distanceToSegment(clicked2, point, loop[(index + 1) % loop.length]) <= heightTolerance))
+    .sort((a, b) => Math.abs(polygonArea(a)) - Math.abs(polygonArea(b)));
+  if (!containingLoops.length) return null;
+
+  let worldPoints = containingLoops[0];
+  let tolerance = diagonal * 0.0015;
+  worldPoints = simplifyClosed(worldPoints, tolerance);
+  while (worldPoints.length > 16) {
+    tolerance *= 1.35;
+    worldPoints = simplifyClosed(worldPoints, tolerance);
+  }
+  if (worldPoints.length < 3) return null;
+
+  const worldXs = worldPoints.map((point) => point.x);
+  const worldZs = worldPoints.map((point) => point.z);
+  const worldWidth = Math.max(...worldXs) - Math.min(...worldXs);
+  const worldDepth = Math.max(...worldZs) - Math.min(...worldZs);
+  if (worldWidth > diagonal * 0.72 || worldDepth > diagonal * 0.72) return null;
+
+  const points = worldPoints.map((point) => roundPoint({
+    x: (point.x - clickedPoint.x) / scale,
+    z: (point.z - clickedPoint.z) / scale,
+  }));
+  const size = dimensions(points);
+  if (size.width < 0.15 || size.depth < 0.15) return null;
+  return {
+    points,
+    width: size.width,
+    depth: size.depth,
+    floorY,
+    confidence: 1,
+    usedFallback: false,
+  };
 }
 
 function clusterWallHits(hits: WallHit[], tolerance: number): DistanceCluster[] {
@@ -421,7 +607,12 @@ export function traceRoomPolygon(
   const minimumDistance = diagonal * 0.006;
   const inset = diagonal * 0.0025;
   const modelMeshSet = new Set(modelMeshes);
-  const floorY = findFloorY(scene, floorPoint, modelMeshes, modelMeshSet, diagonal);
+  const floorSurface = findFloorSurface(scene, floorPoint, modelMeshes, modelMeshSet, diagonal);
+  const floorY = floorSurface.y;
+  const floorBoundary = floorSurface.mesh
+    ? traceFloorMeshBoundary(floorSurface.mesh, floorPoint, floorY, diagonal, scale)
+    : null;
+  if (floorBoundary) return floorBoundary;
   const bounds = modelBounds(modelMeshes);
   const wallHeight = clamp(bounds.max.y - floorY, diagonal * 0.06, diagonal * 0.24);
   const probeHeights = [0.3, 0.44, 0.58, 0.72, 0.86].map((ratio) =>

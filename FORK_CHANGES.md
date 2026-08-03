@@ -81,9 +81,12 @@ entsprechenden Editor-Funktionen gesetzt.
   gespeichert werden. Eckpunkte lassen sich direkt in der 3D-Ansicht auswählen,
   verschieben, hinzufügen und entfernen; ein Reset stellt wieder ein Rechteck her.
 - Neue Räume starten ohne vorgeblendete Fläche. Ein Klick auf eine freie Bodenstelle
-  wird zuerst auf eine breite horizontale Bodenfläche projiziert. Anschließend werden
-  nur hohe, vertikale und über fünf Messhöhen konsistente Wandtreffer für die Kontur
-  verwendet; niedrige oder kompakte Möbel werden dabei weitgehend ignoriert.
+  wird zuerst auf eine breite horizontale Bodenfläche projiziert. Besitzt das importierte
+  Modell eine getrennte Boden-Meshfläche, wird bevorzugt deren tatsächliche Dreiecks-
+  Außenkante als Polygon übernommen. Dadurch enden Räume auch an offenen Türen sauber
+  an ihrer Bodenmaterialgrenze. Für Modelle ohne getrennte Bodenflächen bleibt die
+  Erkennung über hohe, vertikale und über fünf Messhöhen konsistente Wandtreffer als
+  Fallback erhalten; niedrige oder kompakte Möbel werden dabei weitgehend ignoriert.
 - Solange keine Kontur erkannt wurde, bleiben Transformationswerkzeuge und Speichern
   ausgeblendet beziehungsweise deaktiviert. Erst die anschließende Feinbearbeitung
   blendet kleine Eckpunktgriffe ein; das Gizmo erscheint nur für den gewählten Griff.
