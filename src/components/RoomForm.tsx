@@ -24,7 +24,6 @@ export interface RoomFormHandle {
   removePoint: (index: number) => void;
   resetPoints: () => void;
   applyDetectedPolygon: (points: RoomZonePoint[]) => void;
-  applySplitPolygon: (points: RoomZonePoint[]) => void;
   addVirtualWall: (wall: RoomVirtualWall) => number;
   setVirtualWalls: (walls: RoomVirtualWall[]) => void;
   updateVirtualWallEndpoint: (index: number, endpoint: 'start' | 'end', point: RoomZonePoint) => void;
@@ -178,11 +177,6 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
       const next = detectedPoints.map(roundPoint);
       setPoints(next);
       setRotationY(0);
-      applyPointDimensions(next);
-    },
-    applySplitPolygon: (splitPoints) => {
-      const next = splitPoints.map(roundPoint);
-      setPoints(next);
       applyPointDimensions(next);
     },
     addVirtualWall: (wall) => {

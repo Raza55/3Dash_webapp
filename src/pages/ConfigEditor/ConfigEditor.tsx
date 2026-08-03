@@ -68,6 +68,7 @@ import SmartDeviceList from '../../components/SmartDeviceList';
 import SmartDeviceForm, { type SmartDeviceFormHandle, type SmartDevicePreviewInfo } from '../../components/SmartDeviceForm';
 import RoomList from '../../components/RoomList';
 import RoomForm, { type RoomFormHandle, type RoomPreviewInfo } from '../../components/RoomForm';
+import RoomSplitAssignmentDialog, { type RoomSplitTargetOption } from '../../components/RoomSplitAssignmentDialog';
 import { arrayMove } from '@dnd-kit/sortable';
 import TubeList from '../../components/TubeList';
 import TubeForm, { type TubePreviewInfo } from '../../components/TubeForm';
@@ -94,9 +95,11 @@ import { createSceneScaleRoot, getModelScale, worldToConfigPosition } from '../.
 import { sceneRelativeDefaults, type SceneRelativeDefaults } from '../../utils/editorControls';
 import {
   keepAvailableDetectedRoomPart,
+  roomZonePointArea,
   roomZonePointBounds,
   splitRoomZoneByLine,
 } from '../../utils/roomZoneBoolean';
+import { rankRoomEntities } from '../../utils/roomEntityPriority';
 import { useTranslation } from '../../contexts/LanguageContext';
 import GuidedTour from '../../components/GuidedTour/GuidedTour';
 import { editorTourSteps } from '../../components/GuidedTour/tourSteps';
@@ -463,6 +466,8 @@ export default function ConfigEditor() {
   const roomPanelOpenRef = useRef(roomPanelOpen);
   roomPanelOpenRef.current = roomPanelOpen;
   const [roomDraft, setRoomDraft] = useState<RoomConfig | null>(null);
+  const roomDraftRef = useRef(roomDraft);
+  roomDraftRef.current = roomDraft;
   const [roomZoneReady, setRoomZoneReady] = useState(false);
   const roomZoneReadyRef = useRef(roomZoneReady);
   roomZoneReadyRef.current = roomZoneReady;
@@ -474,6 +479,7 @@ export default function ConfigEditor() {
   const [roomSplitDrawing, setRoomSplitDrawing] = useState(false);
   const [roomSplitStartSet, setRoomSplitStartSet] = useState(false);
   const [roomSplitPieces, setRoomSplitPieces] = useState<RoomZonePoint[][]>([]);
+  const [roomSplitAssignments, setRoomSplitAssignments] = useState<string[]>([]);
   const [roomPointCount, setRoomPointCount] = useState(4);
   const [roomGizmoActive, setRoomGizmoActive] = useState(false);
   const [roomOverlapNames, setRoomOverlapNames] = useState<string[]>([]);
@@ -523,6 +529,42 @@ export default function ConfigEditor() {
     for (const tube of tubes) for (const line of tube.lines) ids.add(line.sensorId);
     return ids;
   }, [blinds, displays, lights, smartDevices, tubes]);
+
+  const roomSplitSourceRoom = roomEditIdx !== null ? rooms[roomEditIdx] ?? null : roomDraft;
+  const roomSplitSourceTargetKey = roomSplitSourceRoom
+    ? roomEditIdx !== null
+      ? `room:${roomSplitSourceRoom.id}`
+      : `draft:${roomSplitSourceRoom.id}`
+    : null;
+  const roomSplitTargetOptions = useMemo<RoomSplitTargetOption[]>(() => {
+    const currentRoomId = roomEditIdx !== null ? rooms[roomEditIdx]?.id : null;
+    const options: RoomSplitTargetOption[] = rooms.map((room) => ({
+      value: `room:${room.id}`,
+      label: room.id === currentRoomId
+        ? `${room.name} (${t('rooms.splitCurrentTarget')})`
+        : `${room.name} (${t('rooms.splitReplaceTarget')})`,
+      group: 'existing',
+    }));
+    if (roomEditIdx === null && roomDraft) {
+      options.unshift({
+        value: `draft:${roomDraft.id}`,
+        label: `${roomDraft.name || t('rooms.newName')} (${t('rooms.splitCurrentTarget')})`,
+        group: 'existing',
+      });
+    }
+
+    const linkedAreaIds = new Set(rooms.flatMap((room) => room.haAreaIds));
+    for (const areaId of roomDraft?.haAreaIds ?? []) linkedAreaIds.add(areaId);
+    for (const area of haAreas) {
+      if (linkedAreaIds.has(area.area_id)) continue;
+      options.push({
+        value: `area:${area.area_id}`,
+        label: area.name,
+        group: 'available',
+      });
+    }
+    return options;
+  }, [haAreas, roomDraft, roomEditIdx, rooms, t]);
 
   // Current preview shape/size from LightForm
   const previewInfoRef = useRef<PreviewInfo>({ shape: 'sphere', size: { diameter: editorDefaultSizes.light.diameter } });
@@ -1902,6 +1944,7 @@ export default function ConfigEditor() {
     setRoomSplitDrawing(false);
     setRoomSplitStartSet(false);
     setRoomSplitPieces([]);
+    setRoomSplitAssignments([]);
     clearRoomSplitDraft();
     const ctx = sceneCtxRef.current;
     if (ctx && canvasRef.current) {
@@ -2147,6 +2190,17 @@ export default function ConfigEditor() {
 
       roomSplitPiecesRef.current = pieces;
       setRoomSplitPieces(pieces);
+      const sourceIndex = roomEditIdxRef.current;
+      const source = sourceIndex === null ? roomDraftRef.current : roomsRef.current[sourceIndex] ?? null;
+      const sourceTarget = source
+        ? sourceIndex === null ? `draft:${source.id}` : `room:${source.id}`
+        : '';
+      const largestPieceIndex = pieces.reduce((largestIndex, piece, pieceIndex) => (
+        roomZonePointArea(piece) > roomZonePointArea(pieces[largestIndex]) ? pieceIndex : largestIndex
+      ), 0);
+      setRoomSplitAssignments(pieces.map((_, pieceIndex) => (
+        pieceIndex === largestPieceIndex ? sourceTarget : ''
+      )));
       delete canvas.dataset.roomSplitDrawing;
       roomSplitDrawingRef.current = false;
       setRoomSplitDrawing(false);
@@ -2167,7 +2221,7 @@ export default function ConfigEditor() {
       ctx.camera.attachControl(canvas, true);
       canvas.style.cursor = 'pointer';
       updateRoomPreview(positionRef.current, roomPreviewInfoRef.current);
-      showToast(t('rooms.splitChoose'));
+      showToast(t('rooms.splitAssignReady'));
     };
     canvas.addEventListener('pointermove', handleRoomSplitPointerMove, true);
     canvas.addEventListener('pointerdown', handleRoomSplitPointerDown, true);
@@ -2468,33 +2522,6 @@ export default function ConfigEditor() {
         if (roomPick?.hit && roomPick.pickedMesh) {
           const metadata = roomPick.pickedMesh.metadata;
           if (metadata.roomEditorTarget === 'splitPiece') {
-            const piece = roomSplitPiecesRef.current[Number(metadata.roomSplitPieceIndex)];
-            if (piece?.length >= 3) {
-              const bounds = roomZonePointBounds(piece);
-              const nextInfo: RoomPreviewInfo = {
-                ...roomPreviewInfoRef.current,
-                size: {
-                  ...roomPreviewInfoRef.current.size,
-                  width: bounds.width,
-                  depth: bounds.depth,
-                },
-                points: piece.map((point) => ({ ...point })),
-              };
-              roomSplitPiecesRef.current = [];
-              setRoomSplitPieces([]);
-              roomPreviewInfoRef.current = nextInfo;
-              roomFormRef.current?.applySplitPolygon(piece);
-              roomSelectedPointRef.current = null;
-              setRoomSelectedPoint(null);
-              roomSelectedVirtualWallRef.current = null;
-              setRoomSelectedVirtualWall(null);
-              roomSelectedVirtualWallEndpointRef.current = null;
-              setRoomSelectedVirtualWallEndpoint(null);
-              roomGizmoActiveRef.current = false;
-              setRoomGizmoActive(false);
-              updateRoomPreview(positionRef.current, nextInfo);
-              showToast(t('rooms.splitAssigned'));
-            }
             return;
           }
           const pointIndex = metadata.roomEditorTarget === 'point'
@@ -4054,6 +4081,128 @@ export default function ConfigEditor() {
     showToast(t('rooms.virtualWallRemoved'));
   }, [showToast, t, updateRoomPreview]);
 
+  const handleRoomSplitAssignmentChange = useCallback((pieceIndex: number, target: string) => {
+    setRoomSplitAssignments((current) => current.map((value, index) => (
+      index === pieceIndex ? target : value
+    )));
+  }, []);
+
+  const handleApplyRoomSplitAssignments = useCallback(async () => {
+    const pieces = roomSplitPiecesRef.current;
+    const assignments = roomSplitAssignments;
+    if (!pieces.length
+      || assignments.length !== pieces.length
+      || assignments.some((target) => !target)
+      || new Set(assignments).size !== assignments.length) {
+      showToast(t('rooms.splitAssignmentRequired'));
+      return;
+    }
+
+    const sourceIndex = roomEditIdxRef.current;
+    const sourceExistingRoom = sourceIndex === null ? null : roomsRef.current[sourceIndex] ?? null;
+    const sourceDraft = sourceIndex === null ? roomDraftRef.current : null;
+    const selectedExistingIds = new Set(
+      assignments
+        .filter((target) => target.startsWith('room:'))
+        .map((target) => target.slice('room:'.length)),
+    );
+    const replacements = new Map<string, RoomConfig>();
+    const additions: RoomConfig[] = [];
+
+    const withSplitGeometry = (base: RoomConfig, piece: RoomZonePoint[]): RoomConfig => {
+      const bounds = roomZonePointBounds(piece);
+      return {
+        ...base,
+        anchor: { ...positionRef.current },
+        zone: {
+          width: bounds.width,
+          height: roomPreviewInfoRef.current.size.height,
+          depth: bounds.depth,
+          rotationY: roomPreviewInfoRef.current.rotation.y,
+          points: piece.map((point) => ({ ...point })),
+        },
+      };
+    };
+
+    for (let pieceIndex = 0; pieceIndex < pieces.length; pieceIndex++) {
+      const target = assignments[pieceIndex];
+      const piece = pieces[pieceIndex];
+      if (target.startsWith('room:')) {
+        const roomId = target.slice('room:'.length);
+        const existing = roomsRef.current.find((room) => room.id === roomId);
+        if (!existing) {
+          showToast(t('rooms.splitTargetUnavailable'));
+          return;
+        }
+        replacements.set(existing.id, withSplitGeometry(existing, piece));
+        continue;
+      }
+      if (target.startsWith('draft:')) {
+        if (!sourceDraft || target !== `draft:${sourceDraft.id}`) {
+          showToast(t('rooms.splitTargetUnavailable'));
+          return;
+        }
+        additions.push(withSplitGeometry({
+          ...sourceDraft,
+          name: roomPreviewInfoRef.current.name || sourceDraft.name,
+        }, piece));
+        continue;
+      }
+      if (target.startsWith('area:')) {
+        const areaId = target.slice('area:'.length);
+        const area = haAreas.find((candidate) => candidate.area_id === areaId);
+        if (!area) {
+          showToast(t('rooms.splitTargetUnavailable'));
+          return;
+        }
+        const primaryEntityIds = rankRoomEntities(
+          haRoomEntities.filter((entity) => entity.area_id === areaId),
+          placedEntityIds,
+        ).slice(0, 8).map((entity) => entity.entity_id);
+        additions.push(withSplitGeometry({
+          id: generateUUID(),
+          name: area.name,
+          haAreaIds: [area.area_id],
+          anchor: { ...positionRef.current },
+          zone: {
+            width: 1,
+            height: roomPreviewInfoRef.current.size.height,
+            depth: 1,
+          },
+          primaryEntityIds,
+        }, piece));
+        continue;
+      }
+      showToast(t('rooms.splitTargetUnavailable'));
+      return;
+    }
+
+    const sourceExistingId = sourceExistingRoom?.id ?? null;
+    const updated = roomsRef.current
+      .filter((room) => room.id !== sourceExistingId || selectedExistingIds.has(room.id))
+      .map((room) => replacements.get(room.id) ?? room);
+    for (const room of additions) {
+      const existingIndex = updated.findIndex((candidate) => candidate.id === room.id);
+      if (existingIndex === -1) updated.push(room);
+      else updated[existingIndex] = room;
+    }
+
+    const conflictIds = findOverlappingRoomIds(updated);
+    if (conflictIds.size) {
+      const conflictNames = updated
+        .filter((room) => conflictIds.has(room.id))
+        .map((room) => room.name);
+      showToast(t('rooms.overlapBlocked', { rooms: conflictNames.join(', ') }));
+      return;
+    }
+
+    setRooms(updated);
+    roomsRef.current = updated;
+    await updateConfig({ rooms: updated });
+    handleCloseRoomPanel();
+    showToast(t('rooms.splitAssignmentsSaved'));
+  }, [haAreas, haRoomEntities, handleCloseRoomPanel, placedEntityIds, roomSplitAssignments, showToast, t]);
+
   const handleSaveRoom = useCallback(async (room: RoomConfig) => {
     const conflicts = findOverlappingRooms(room, rooms);
     if (conflicts.length) {
@@ -4677,7 +4826,7 @@ export default function ConfigEditor() {
         <canvas ref={canvasRef} />
         <div className={`mode-banner${placingMode || roomVirtualWallDrawing || roomSplitDrawing || roomSplitPieces.length ? ' visible' : ''}`}>
           {roomSplitPieces.length
-            ? t('rooms.splitChoose')
+            ? t('rooms.splitAssignBanner')
             : roomSplitDrawing
               ? t(roomSplitStartSet ? 'rooms.splitEnd' : 'rooms.splitStart')
               : roomVirtualWallDrawing
@@ -4907,6 +5056,17 @@ export default function ConfigEditor() {
           onExitPlacingMode={exitPlacingMode}
           onSave={handleSaveRoom}
           onClose={handleCloseRoomPanel}
+        />
+
+        <RoomSplitAssignmentDialog
+          pieces={roomSplitPieces}
+          assignments={roomSplitAssignments}
+          options={roomSplitTargetOptions}
+          sourceTargetKey={roomSplitSourceTargetKey}
+          sourceRoomName={roomSplitSourceRoom?.name ?? t('rooms.newName')}
+          onAssignmentChange={handleRoomSplitAssignmentChange}
+          onConfirm={() => { void handleApplyRoomSplitAssignments(); }}
+          onCancel={cancelRoomSplit}
         />
       </div>
 

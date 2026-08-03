@@ -105,9 +105,11 @@ entsprechenden Editor-Funktionen gesetzt.
   Bodenpunkt. Ist dort keine überlappungsfreie, als einfaches Polygon darstellbare
   Fläche vorhanden, wird die Erkennung abgelehnt statt eine Überschneidung anzulegen.
 - Mit dem Scheren-Werkzeug lässt sich eine bestehende Raumfläche direkt in der
-  3D-Ansicht teilen: Zwei Bodenpunkte definieren die Schnittlinie, danach wird der
-  Teil angeklickt, der dem aktuellen Raum zugeordnet bleiben soll. Die übrigen Teile
-  werden frei und können anschließend einem anderen Raum zugewiesen werden.
+  3D-Ansicht teilen. Nach dem Schnitt öffnet sich eine Zuordnung für alle Teilflächen:
+  Jede Teilfläche kann einem bereits konfigurierten Raum zugewiesen werden, dessen
+  alte Fläche dadurch ersetzt wird, oder einem noch freien Home-Assistant-Bereich.
+  Freie Bereiche werden als neue Räume samt priorisierter Entities angelegt. Der
+  Quellraum wird entfernt, falls ihm kein Teil zugewiesen wird.
 - Solange keine Kontur erkannt wurde, bleiben Transformationswerkzeuge und Speichern
   ausgeblendet beziehungsweise deaktiviert. Erst die anschließende Feinbearbeitung
   blendet kleine Eckpunktgriffe ein; das Gizmo erscheint nur für den gewählten Griff.

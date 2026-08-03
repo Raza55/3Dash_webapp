@@ -69,6 +69,10 @@ function polygonArea(points: RoomZonePoint[]): number {
   return Math.abs(area / 2);
 }
 
+export function roomZonePointArea(points: RoomZonePoint[]): number {
+  return polygonArea(points);
+}
+
 export function roomZonePointBounds(points: RoomZonePoint[]): { width: number; depth: number } {
   const xs = points.map((point) => point.x);
   const zs = points.map((point) => point.z);

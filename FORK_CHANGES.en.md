@@ -102,9 +102,11 @@ are used.
   floor and keeps the available component at the clicked floor point. If no non-overlapping
   component can be represented as a simple polygon there, detection is rejected instead
   of creating an overlap.
-- A scissors tool splits an existing room area directly in the 3D view: two floor points
-  define the cut line, then the user clicks the part that should remain assigned to the
-  current room. The other parts become unassigned and can be detected for another room.
+- A scissors tool splits an existing room area directly in the 3D view. After the cut,
+  an assignment dialog covers every resulting part: each part can replace the area of
+  an existing configured room or be assigned to an unassigned Home Assistant area.
+  Unassigned areas become new rooms with prioritised entities. The source room is
+  removed when none of the resulting parts is assigned to it.
 - Until an outline has been detected, transform tools and saving remain hidden or
   disabled. Fine editing then shows small corner handles, while the gizmo appears only
   for the selected handle.
