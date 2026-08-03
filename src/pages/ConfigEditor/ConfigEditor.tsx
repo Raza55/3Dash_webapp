@@ -2352,15 +2352,7 @@ export default function ConfigEditor() {
             currentInfo.rotation.y,
             modelScaleRef.current,
           );
-          const editedRoomId = roomEditIdxRef.current === null
-            ? null
-            : roomsRef.current[roomEditIdxRef.current]?.id ?? null;
-          const neighboringRooms = roomsRef.current
-            .filter((room) => room.id !== editedRoomId
-              && Math.abs(room.anchor.y - p.y) <= ROOM_FLOOR_TOLERANCE);
-          const neighboringBoundaryWalls = neighboringRooms
-            .flatMap((room) => roomBoundaryWallsToWorld(room, modelScaleRef.current));
-          const trace = traceRoomPolygon(
+          const initialTrace = traceRoomPolygon(
             ctx.scene,
             placePick.pickedPoint,
             modelMeshesRef.current,
@@ -2369,9 +2361,35 @@ export default function ConfigEditor() {
               modelScale: modelScaleRef.current,
               fallbackWidth: currentInfo.size.width,
               fallbackDepth: currentInfo.size.depth,
-              virtualWalls: [...ownWorldVirtualWalls, ...neighboringBoundaryWalls],
+              virtualWalls: ownWorldVirtualWalls,
             },
           );
+          const initialFloorPosition = worldToConfigPosition(
+            new Vector3(placePick.pickedPoint.x, initialTrace.floorY, placePick.pickedPoint.z),
+            modelScaleRef.current,
+          );
+          const editedRoomId = roomEditIdxRef.current === null
+            ? null
+            : roomsRef.current[roomEditIdxRef.current]?.id ?? null;
+          const neighboringRooms = roomsRef.current
+            .filter((room) => room.id !== editedRoomId
+              && Math.abs(room.anchor.y - initialFloorPosition.y) <= ROOM_FLOOR_TOLERANCE);
+          const neighboringBoundaryWalls = neighboringRooms
+            .flatMap((room) => roomBoundaryWallsToWorld(room, modelScaleRef.current));
+          const trace = neighboringBoundaryWalls.length
+            ? traceRoomPolygon(
+              ctx.scene,
+              placePick.pickedPoint,
+              modelMeshesRef.current,
+              {
+                modelDiagonal: modelDiagonalRef.current,
+                modelScale: modelScaleRef.current,
+                fallbackWidth: currentInfo.size.width,
+                fallbackDepth: currentInfo.size.depth,
+                virtualWalls: [...ownWorldVirtualWalls, ...neighboringBoundaryWalls],
+              },
+            )
+            : initialTrace;
           const snappedFloorPosition = worldToConfigPosition(
             new Vector3(placePick.pickedPoint.x, trace.floorY, placePick.pickedPoint.z),
             modelScaleRef.current,
@@ -2405,6 +2423,17 @@ export default function ConfigEditor() {
             points: availableZone.points,
             virtualWalls: rebasedVirtualWalls,
           };
+          const remainingConflicts = findOverlappingRooms(
+            roomPreviewToConfig('__detected-room__', newPos, nextInfo),
+            neighboringRooms,
+          );
+          if (remainingConflicts.length) {
+            showToast(t('rooms.traceOverlapRejected', {
+              rooms: remainingConflicts.map((room) => room.name).join(', '),
+            }));
+            pointerDownPos = null;
+            return;
+          }
           setPosition(newPos);
           positionRef.current = newPos;
           roomPreviewInfoRef.current = nextInfo;

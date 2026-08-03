@@ -102,6 +102,9 @@ are used.
   floor and keeps the available component at the clicked floor point. If no non-overlapping
   component can be represented as a simple polygon there, detection is rejected instead
   of creating an overlap.
+- The floor is determined from the detected floor surface rather than the height of any
+  clicked furniture. Detection then runs again with every neighbouring room boundary and
+  defensively rejects any remaining overlap.
 - A scissors tool splits an existing room area directly in the 3D view. After the cut,
   an assignment dialog covers every resulting part: each part can replace the area of
   an existing configured room or be assigned to an unassigned Home Assistant area.

@@ -104,6 +104,9 @@ entsprechenden Editor-Funktionen gesetzt.
   geometrisch von der neuen Kontur ab und behält den freien Teil am angeklickten
   Bodenpunkt. Ist dort keine überlappungsfreie, als einfaches Polygon darstellbare
   Fläche vorhanden, wird die Erkennung abgelehnt statt eine Überschneidung anzulegen.
+- Die Etage wird dabei anhand der erkannten Bodenhöhe bestimmt, nicht anhand der Höhe
+  des angeklickten Möbels. Die Erkennung läuft anschließend mit den Begrenzungen aller
+  Nachbarräume erneut und verwirft defensiv jede verbleibende Überschneidung.
 - Mit dem Scheren-Werkzeug lässt sich eine bestehende Raumfläche direkt in der
   3D-Ansicht teilen. Nach dem Schnitt öffnet sich eine Zuordnung für alle Teilflächen:
   Jede Teilfläche kann einem bereits konfigurierten Raum zugewiesen werden, dessen
