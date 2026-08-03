@@ -89,6 +89,9 @@ entsprechenden Editor-Funktionen gesetzt.
 - Die globalen Werkzeuge Verschieben, Drehen und Skalieren gelten auch für die gesamte
   Raumfläche. Beim Verschieben eines einzelnen Polygonpunkts bleibt die vertikale
   Raumebene gesperrt.
+- Beim Bearbeiten wird nur die aktive Raumfläche angezeigt. Veraltete Vorschauflächen,
+  Konturen und Eckpunktgriffe werden vor jedem Neuaufbau vollständig entfernt, damit
+  sie sich beim Verschieben nicht überlagern.
 - Zugeordnete Entities werden nach Sicherheit, Hauptsteuerung, Klima, Medien und
   Raumstatus priorisiert. Diagnostik-, Konfigurations- und deaktivierte Entities werden
   standardmäßig ausgeblendet.

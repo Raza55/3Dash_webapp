@@ -867,6 +867,13 @@ export default function ConfigEditor() {
       gizmoRef.current.dispose();
       gizmoRef.current = null;
     }
+    if (roomPreviewRootRef.current) {
+      roomPreviewRootRef.current.dispose(false, true);
+      roomPreviewRootRef.current = null;
+      roomPreviewSurfaceRef.current = null;
+      roomPreviewOutlineRef.current = null;
+      roomPreviewPointHandlesRef.current = [];
+    }
     if (previewMeshRef.current) {
       previewMeshRef.current.material?.dispose();
       previewMeshRef.current.dispose();
@@ -1926,9 +1933,9 @@ export default function ConfigEditor() {
       disposeAllRoomZones(roomZoneMeshMapRef.current);
       return;
     }
-    const visibleRooms = roomPanelOpen && roomEditIdx !== null
-      ? rooms.filter((_, index) => index !== roomEditIdx)
-      : rooms;
+    // Keep the canvas focused while tracing or refining a room. The active
+    // preview is the only room surface shown until the panel is closed.
+    const visibleRooms = roomPanelOpen ? [] : rooms;
     rebuildAllRoomZones(
       scene,
       roomZoneMeshMapRef.current,
@@ -2522,13 +2529,6 @@ export default function ConfigEditor() {
     if (gizmoRef.current) {
       gizmoRef.current.dispose();
       gizmoRef.current = null;
-    }
-    if (roomPreviewRootRef.current) {
-      roomPreviewRootRef.current.dispose(false, true);
-      roomPreviewRootRef.current = null;
-      roomPreviewSurfaceRef.current = null;
-      roomPreviewOutlineRef.current = null;
-      roomPreviewPointHandlesRef.current = [];
     }
     const previewId = blindPreviewIdRef.current;
     if (previewId) {

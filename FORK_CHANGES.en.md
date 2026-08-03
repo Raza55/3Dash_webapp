@@ -88,6 +88,9 @@ are used.
   for the selected handle.
 - The global Move, Rotate, and Scale tools apply to the complete room area. Moving an
   individual polygon point keeps it locked to the room's floor plane.
+- While editing, only the active room area is shown. Stale preview surfaces, outlines,
+  and corner handles are fully removed before each rebuild so they cannot overlap
+  while being moved.
 - Assigned entities are ranked by Safety, Primary Controls, Climate, Media, and Room
   Status. Diagnostic, configuration, disabled, and hidden entities are omitted by
   default.
