@@ -95,6 +95,9 @@ are used.
   including concave outlines, while allowing shared edges and corners. Conflicts are
   shown in red with the affected room names, and both room-level and global saving stay
   blocked until the overlap is resolved. Rooms on different floors remain independent.
+- In Rooms mode, all saved neighboring rooms remain visible while another area is being
+  edited or detected. Polygon edges on the same floor automatically act as finite virtual
+  partitions during detection without being copied into the new room as manual walls.
 - Until an outline has been detected, transform tools and saving remain hidden or
   disabled. Fine editing then shows small corner handles, while the gizmo appears only
   for the selected handle.

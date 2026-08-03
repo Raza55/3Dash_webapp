@@ -268,14 +268,32 @@ function dimensions(points: RoomZonePoint[]): { width: number; depth: number } {
   };
 }
 
-function fallbackResult(width: number, depth: number, floorY: number): RoomPolygonTraceResult {
-  const points = [
+function fallbackResult(
+  width: number,
+  depth: number,
+  floorY: number,
+  origin: Point2,
+  scale: number,
+  virtualWalls: RoomVirtualWall[],
+  diagonal: number,
+): RoomPolygonTraceResult {
+  const localPoints = [
     { x: -width / 2, z: -depth / 2 },
     { x: width / 2, z: -depth / 2 },
     { x: width / 2, z: depth / 2 },
     { x: -width / 2, z: depth / 2 },
-  ].map(roundPoint);
-  return { points, width, depth, floorY, confidence: 0, usedFallback: true };
+  ];
+  const worldBoundary = localPoints.map((point) => ({
+    x: origin.x + point.x * scale,
+    z: origin.z + point.z * scale,
+  }));
+  const constrained = applyVirtualWallsToFloorBoundary(worldBoundary, origin, virtualWalls, diagonal);
+  const points = (constrained ?? worldBoundary).map((point) => roundPoint({
+    x: (point.x - origin.x) / scale,
+    z: (point.z - origin.z) / scale,
+  }));
+  const size = dimensions(points);
+  return { points, width: size.width, depth: size.depth, floorY, confidence: 0, usedFallback: true };
 }
 
 function modelBounds(meshes: AbstractMesh[]): ModelBounds {
@@ -747,7 +765,15 @@ export function traceRoomPolygon(
 
   const validCount = rawDistances.filter((value) => value !== null).length;
   const filled = fillMissingDistances(rawDistances);
-  if (!filled) return fallbackResult(options.fallbackWidth, options.fallbackDepth, floorY);
+  if (!filled) return fallbackResult(
+    options.fallbackWidth,
+    options.fallbackDepth,
+    floorY,
+    { x: rayOrigin.x, z: rayOrigin.z },
+    scale,
+    options.virtualWalls ?? [],
+    diagonal,
+  );
   const smoothed = smoothDistances(filled);
   let worldPoints: Point2[] = smoothed.map((distance, index) => {
     const angle = (index / rayCount) * Math.PI * 2;
@@ -770,12 +796,28 @@ export function traceRoomPolygon(
     tolerance *= 1.35;
     worldPoints = simplifyClosed(worldPoints, tolerance);
   }
-  if (worldPoints.length < 3) return fallbackResult(options.fallbackWidth, options.fallbackDepth, floorY);
+  if (worldPoints.length < 3) return fallbackResult(
+    options.fallbackWidth,
+    options.fallbackDepth,
+    floorY,
+    { x: rayOrigin.x, z: rayOrigin.z },
+    scale,
+    options.virtualWalls ?? [],
+    diagonal,
+  );
 
   const points = worldPoints.map((point) => roundPoint({ x: point.x / scale, z: point.z / scale }));
   const size = dimensions(points);
   if (size.width < 0.15 || size.depth < 0.15) {
-    return fallbackResult(options.fallbackWidth, options.fallbackDepth, floorY);
+    return fallbackResult(
+      options.fallbackWidth,
+      options.fallbackDepth,
+      floorY,
+      { x: rayOrigin.x, z: rayOrigin.z },
+      scale,
+      options.virtualWalls ?? [],
+      diagonal,
+    );
   }
   return {
     points,

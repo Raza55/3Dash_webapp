@@ -96,6 +96,10 @@ entsprechenden Editor-Funktionen gesetzt.
   Konflikte werden rot und mit den betroffenen Raumnamen angezeigt; Raum- und globales
   Speichern bleiben gesperrt, bis die Überschneidung behoben ist. Andere Etagen bleiben
   unabhängig voneinander.
+- Im Räume-Modus bleiben alle bereits gespeicherten Nachbarräume auch beim Bearbeiten
+  oder Erkennen einer weiteren Fläche sichtbar. Ihre Polygonkanten werden auf derselben
+  Ebene automatisch als endliche virtuelle Trennwände für die Raumerkennung verwendet,
+  ohne sie als manuelle Wände in den neuen Raum zu kopieren.
 - Solange keine Kontur erkannt wurde, bleiben Transformationswerkzeuge und Speichern
   ausgeblendet beziehungsweise deaktiviert. Erst die anschließende Feinbearbeitung
   blendet kleine Eckpunktgriffe ein; das Gizmo erscheint nur für den gewählten Griff.

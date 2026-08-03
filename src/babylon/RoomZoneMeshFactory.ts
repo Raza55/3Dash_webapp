@@ -30,9 +30,9 @@ export interface RoomZoneLabelEntry {
   labelTexture: DynamicTexture;
 }
 
-const ROOM_FLOOR_TOLERANCE = 0.12;
+export const ROOM_FLOOR_TOLERANCE = 0.12;
 
-function roomZoneWorldPoints(room: RoomConfig): RoomZonePoint[] {
+export function getRoomZoneWorldPoints(room: RoomConfig): RoomZonePoint[] {
   const angle = Tools.ToRadians(room.zone.rotationY ?? 0);
   const cosine = Math.cos(angle);
   const sine = Math.sin(angle);
@@ -85,8 +85,8 @@ function trianglesOverlapWithArea(
 export function roomZonesOverlap(first: RoomConfig, second: RoomConfig): boolean {
   if (Math.abs(first.anchor.y - second.anchor.y) > ROOM_FLOOR_TOLERANCE) return false;
 
-  const firstPoints = roomZoneWorldPoints(first);
-  const secondPoints = roomZoneWorldPoints(second);
+  const firstPoints = getRoomZoneWorldPoints(first);
+  const secondPoints = getRoomZoneWorldPoints(second);
   if (firstPoints.length < 3 || secondPoints.length < 3) return false;
 
   const firstBounds = polygonBounds(firstPoints);

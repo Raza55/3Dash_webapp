@@ -80,8 +80,10 @@ import {
   disposeAllRoomZones,
   findOverlappingRoomIds,
   findOverlappingRooms,
+  getRoomZoneWorldPoints,
   rebuildAllRoomZones,
   rectangleRoomZonePoints,
+  ROOM_FLOOR_TOLERANCE,
   roomZoneOutlinePoints,
   setRoomZoneLabelVisibility,
   updateRoomZoneSurface,
@@ -149,6 +151,17 @@ function roomVirtualWallsToWorld(
     };
   };
   return walls.map((wall) => ({ start: convert(wall.start), end: convert(wall.end) }));
+}
+
+function roomBoundaryWallsToWorld(room: RoomConfig, modelScale: number): RoomVirtualWall[] {
+  const points = getRoomZoneWorldPoints(room);
+  return points.map((point, index) => {
+    const next = points[(index + 1) % points.length];
+    return {
+      start: { x: point.x * modelScale, z: point.z * modelScale },
+      end: { x: next.x * modelScale, z: next.z * modelScale },
+    };
+  });
 }
 
 function roomPreviewToConfig(
@@ -1955,7 +1968,11 @@ export default function ConfigEditor() {
       }
 
       if (roomVirtualWallDrawingRef.current && roomVirtualWallDraftStartRef.current) {
-        const wallPick = ctx.scene.pick(evt.offsetX, evt.offsetY, (mesh) => !mesh.metadata?.previewTarget);
+        const wallPick = ctx.scene.pick(
+          evt.offsetX,
+          evt.offsetY,
+          (mesh) => modelMeshesRef.current.includes(mesh),
+        );
         if (wallPick?.hit && wallPick.pickedPoint) {
           const localEnd = worldPointToRoomLocal(
             wallPick.pickedPoint,
@@ -1995,7 +2012,11 @@ export default function ConfigEditor() {
       pointerDownPos = { x: evt.clientX, y: evt.clientY };
 
       if (roomVirtualWallDrawingRef.current && roomPanelOpenRef.current) {
-        const wallPick = ctx.scene.pick(evt.offsetX, evt.offsetY, (mesh) => !mesh.metadata?.previewTarget);
+        const wallPick = ctx.scene.pick(
+          evt.offsetX,
+          evt.offsetY,
+          (mesh) => modelMeshesRef.current.includes(mesh),
+        );
         if (!wallPick.hit || !wallPick.pickedPoint) return;
         const localPoint = worldPointToRoomLocal(
           wallPick.pickedPoint,
@@ -2042,20 +2063,33 @@ export default function ConfigEditor() {
       }
 
       if (placingModeRef.current) {
-        // Re-pick excluding preview meshes so we hit the model surface
-        const placePick = ctx.scene.pick(evt.offsetX, evt.offsetY, (m) => !m.metadata?.previewTarget);
+        // Re-pick editor overlays so placement still reaches the imported model surface.
+        const placePick = ctx.scene.pick(
+          evt.offsetX,
+          evt.offsetY,
+          (mesh) => roomPanelOpenRef.current
+            ? modelMeshesRef.current.includes(mesh)
+            : !mesh.metadata?.previewTarget,
+        );
         if (!placePick.hit || !placePick.pickedPoint) return;
         posUndoStackRef.current.push({ ...positionRef.current });
         const p = worldToConfigPosition(placePick.pickedPoint, modelScaleRef.current);
 
         if (roomPanelOpenRef.current) {
           const currentInfo = roomPreviewInfoRef.current;
-          const worldVirtualWalls = roomVirtualWallsToWorld(
+          const ownWorldVirtualWalls = roomVirtualWallsToWorld(
             currentInfo.virtualWalls,
             positionRef.current,
             currentInfo.rotation.y,
             modelScaleRef.current,
           );
+          const editedRoomId = roomEditIdxRef.current === null
+            ? null
+            : roomsRef.current[roomEditIdxRef.current]?.id ?? null;
+          const neighboringBoundaryWalls = roomsRef.current
+            .filter((room) => room.id !== editedRoomId
+              && Math.abs(room.anchor.y - p.y) <= ROOM_FLOOR_TOLERANCE)
+            .flatMap((room) => roomBoundaryWallsToWorld(room, modelScaleRef.current));
           const trace = traceRoomPolygon(
             ctx.scene,
             placePick.pickedPoint,
@@ -2065,7 +2099,7 @@ export default function ConfigEditor() {
               modelScale: modelScaleRef.current,
               fallbackWidth: currentInfo.size.width,
               fallbackDepth: currentInfo.size.depth,
-              virtualWalls: worldVirtualWalls,
+              virtualWalls: [...ownWorldVirtualWalls, ...neighboringBoundaryWalls],
             },
           );
           const snappedFloorPosition = worldToConfigPosition(
@@ -2077,7 +2111,7 @@ export default function ConfigEditor() {
             y: snappedFloorPosition.y,
             z: snappedFloorPosition.z,
           };
-          const rebasedVirtualWalls = worldVirtualWalls.map((wall) => ({
+          const rebasedVirtualWalls = ownWorldVirtualWalls.map((wall) => ({
             start: {
               x: roundValue(wall.start.x / modelScaleRef.current - newPos.x),
               z: roundValue(wall.start.z / modelScaleRef.current - newPos.z),
@@ -2417,9 +2451,11 @@ export default function ConfigEditor() {
       disposeAllRoomZones(roomZoneMeshMapRef.current);
       return;
     }
-    // Keep the canvas focused while tracing or refining a room. The active
-    // preview is the only room surface shown until the panel is closed.
-    const visibleRooms = roomPanelOpen ? [] : rooms;
+    // Keep neighboring room boundaries visible while the active room is represented
+    // by its editable preview. This makes unassigned floor areas easy to spot.
+    const visibleRooms = roomPanelOpen
+      ? rooms.filter((_, index) => index !== roomEditIdx)
+      : rooms;
     rebuildAllRoomZones(
       scene,
       roomZoneMeshMapRef.current,
