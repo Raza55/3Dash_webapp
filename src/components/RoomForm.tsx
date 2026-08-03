@@ -21,6 +21,7 @@ export interface RoomFormHandle {
   addPoint: () => number;
   removePoint: (index: number) => void;
   resetPoints: () => void;
+  applyDetectedPolygon: (points: RoomZonePoint[]) => void;
 }
 
 interface Props {
@@ -32,6 +33,7 @@ interface Props {
   entities: HARoomEntity[];
   placedEntityIds: ReadonlySet<string>;
   defaultZone: { width: number; height: number; depth: number };
+  hasZone: boolean;
   placingMode: boolean;
   onPositionChange: (position: LightPosition) => void;
   onPreviewChange: (info: RoomPreviewInfo) => void;
@@ -61,7 +63,7 @@ function pointBounds(points: RoomZonePoint[]): { width: number; depth: number } 
 
 const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
   open, room, isNew, position, areas, entities, placedEntityIds, defaultZone, placingMode,
-  onPositionChange, onPreviewChange, onEnterPlacingMode, onExitPlacingMode, onSave, onClose,
+  hasZone, onPositionChange, onPreviewChange, onEnterPlacingMode, onExitPlacingMode, onSave, onClose,
 }, ref) {
   const t = useTranslation();
   const [name, setName] = useState('');
@@ -154,6 +156,12 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
       applyPointDimensions(next);
     },
     resetPoints: () => setPoints(null),
+    applyDetectedPolygon: (detectedPoints) => {
+      const next = detectedPoints.map(roundPoint);
+      setPoints(next);
+      setRotationY(0);
+      applyPointDimensions(next);
+    },
   }));
 
   useEffect(() => {
@@ -222,6 +230,7 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
     if (!room) return;
     if (!name.trim()) { alert(t('rooms.nameRequired')); return; }
     if (!areaIds.length) { alert(t('rooms.areaRequired')); return; }
+    if (!hasZone) { alert(t('rooms.traceRequired')); return; }
     const rankedIds = roomEntities.map((entity) => entity.entity_id);
     const orderedPrimaryIds = rankedIds.filter((entityId) => primaryEntityIds.includes(entityId));
     onSave({
@@ -244,9 +253,11 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
   const footer = (
     <>
       <button className="btn btn-primary" onClick={placingMode ? onExitPlacingMode : onEnterPlacingMode}>
-        {placingMode ? t('form.cancelPlacement') : t('rooms.placeCentre')}
+        {placingMode
+          ? t('form.cancelPlacement')
+          : hasZone ? t('rooms.traceAgain') : t('rooms.traceInModel')}
       </button>
-      <button className="btn btn-success" onClick={handleSave}>{t('common.save')}</button>
+      <button className="btn btn-success" onClick={handleSave} disabled={!hasZone}>{t('common.save')}</button>
       <button className="btn btn-ghost" onClick={onClose}>{t('common.cancel')}</button>
     </>
   );
@@ -273,22 +284,33 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
       </AccordionSection>
 
       <AccordionSection title={t('rooms.zone')} defaultOpen>
-        <div className="room-zone-summary">
-          <span>{points ? t('rooms.polygon') : t('rooms.rectangle')}</span>
-          <span>{t('rooms.pointsCount', { count: effectivePoints.length })}</span>
-        </div>
-        <div className="room-form-note">{t('rooms.pointEditHint')}</div>
-        <SliderNumberRow label={t('form.width')} value={width} onChange={handleWidthChange} step={0.01} span={1.5} min={0.1} max={50} fallback={1} />
-        <SliderNumberRow label={t('form.depth')} value={depth} onChange={handleDepthChange} step={0.01} span={1.5} min={0.1} max={50} fallback={1} />
-        <SliderNumberRow label={t('rooms.rotation')} value={rotationY} onChange={setRotationY} step={0.5} span={45} min={-180} max={180} />
+        {!hasZone ? (
+          <div className="room-zone-empty">
+            <strong>{t('rooms.noZone')}</strong>
+            <span>{t('rooms.noZoneHint')}</span>
+          </div>
+        ) : (
+          <>
+            <div className="room-zone-summary">
+              <span>{points ? t('rooms.polygon') : t('rooms.rectangle')}</span>
+              <span>{t('rooms.pointsCount', { count: effectivePoints.length })}</span>
+            </div>
+            <div className="room-form-note">{t('rooms.pointEditHint')}</div>
+            <SliderNumberRow label={t('form.width')} value={width} onChange={handleWidthChange} step={0.01} span={1.5} min={0.1} max={50} fallback={1} />
+            <SliderNumberRow label={t('form.depth')} value={depth} onChange={handleDepthChange} step={0.01} span={1.5} min={0.1} max={50} fallback={1} />
+            <SliderNumberRow label={t('rooms.rotation')} value={rotationY} onChange={setRotationY} step={0.5} span={45} min={-180} max={180} />
+          </>
+        )}
       </AccordionSection>
 
-      <AccordionSection title={t('form.position')} defaultOpen>
-        <div className="placement-hint visible">{t('rooms.positionHint')}</div>
-        <VectorSliderFields label={t('form.position')} value={position} onChange={onPositionChange} step={0.01} span={2} axisLabels={{ x: 'X', y: 'Z', z: 'Y' }} axisColors={{ x: '#f87171', y: '#4ade80', z: '#38bdf8' }} hideLabel />
-      </AccordionSection>
+      {hasZone && (
+        <AccordionSection title={t('form.position')} defaultOpen>
+          <div className="placement-hint visible">{t('rooms.positionHint')}</div>
+          <VectorSliderFields label={t('form.position')} value={position} onChange={onPositionChange} step={0.01} span={2} axisLabels={{ x: 'X', y: 'Z', z: 'Y' }} axisColors={{ x: '#f87171', y: '#4ade80', z: '#38bdf8' }} hideLabel />
+        </AccordionSection>
+      )}
 
-      <AccordionSection title={t('rooms.primaryEntities')} defaultOpen>
+      <AccordionSection title={t('rooms.primaryEntities')}>
         <div className="room-form-note">{t('rooms.priorityHint')}</div>
         {GROUPS.map((group) => {
           const grouped = visibleEntities.filter((entity) => entity.group === group);

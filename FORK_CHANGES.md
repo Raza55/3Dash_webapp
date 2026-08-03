@@ -80,6 +80,12 @@ entsprechenden Editor-Funktionen gesetzt.
 - Raumflächen können als Rechteck oder als frei geformtes, auch konkaves Polygon
   gespeichert werden. Eckpunkte lassen sich direkt in der 3D-Ansicht auswählen,
   verschieben, hinzufügen und entfernen; ein Reset stellt wieder ein Rechteck her.
+- Neue Räume starten ohne vorgeblendete Fläche. Ein Klick auf eine freie Bodenstelle
+  tastet die umgebenden Modellflächen auf mehreren Höhen ab, ignoriert dadurch viele
+  niedrige Möbel und erzeugt eine vereinfachte, direkt bearbeitbare Raumkontur.
+- Solange keine Kontur erkannt wurde, bleiben Transformationswerkzeuge und Speichern
+  ausgeblendet beziehungsweise deaktiviert. Erst die anschließende Feinbearbeitung
+  blendet kleine Eckpunktgriffe ein; das Gizmo erscheint nur für den gewählten Griff.
 - Die globalen Werkzeuge Verschieben, Drehen und Skalieren gelten auch für die gesamte
   Raumfläche. Beim Verschieben eines einzelnen Polygonpunkts bleibt die vertikale
   Raumebene gesperrt.

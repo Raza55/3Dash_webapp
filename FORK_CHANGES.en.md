@@ -80,6 +80,12 @@ are used.
 - Room areas can be stored as rectangles or free-form polygons, including concave
   outlines. Corner points can be selected, moved, added, and removed directly in the
   3D view, and a reset action restores a rectangle.
+- New rooms start without a pre-rendered area. Clicking a clear floor spot probes the
+  surrounding model geometry at several heights, avoiding many low furniture hits,
+  and creates a simplified room outline ready for editing.
+- Until an outline has been detected, transform tools and saving remain hidden or
+  disabled. Fine editing then shows small corner handles, while the gizmo appears only
+  for the selected handle.
 - The global Move, Rotate, and Scale tools apply to the complete room area. Moving an
   individual polygon point keeps it locked to the room's floor plane.
 - Assigned entities are ranked by Safety, Primary Controls, Climate, Media, and Room

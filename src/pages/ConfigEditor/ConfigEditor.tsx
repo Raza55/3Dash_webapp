@@ -82,6 +82,7 @@ import {
   updateRoomZoneSurface,
   type RoomZoneMeshMap,
 } from '../../babylon/RoomZoneMeshFactory';
+import { traceRoomPolygon } from '../../babylon/RoomPolygonTracer';
 import { createSceneScaleRoot, getModelScale, worldToConfigPosition } from '../../babylon/SceneScale';
 import { sceneRelativeDefaults, type SceneRelativeDefaults } from '../../utils/editorControls';
 import { useTranslation } from '../../contexts/LanguageContext';
@@ -374,8 +375,14 @@ export default function ConfigEditor() {
   const roomPanelOpenRef = useRef(roomPanelOpen);
   roomPanelOpenRef.current = roomPanelOpen;
   const [roomDraft, setRoomDraft] = useState<RoomConfig | null>(null);
+  const [roomZoneReady, setRoomZoneReady] = useState(false);
+  const roomZoneReadyRef = useRef(roomZoneReady);
+  roomZoneReadyRef.current = roomZoneReady;
   const [roomSelectedPoint, setRoomSelectedPoint] = useState<number | null>(null);
   const [roomPointCount, setRoomPointCount] = useState(4);
+  const [roomGizmoActive, setRoomGizmoActive] = useState(false);
+  const roomGizmoActiveRef = useRef(roomGizmoActive);
+  roomGizmoActiveRef.current = roomGizmoActive;
   const roomSelectedPointRef = useRef<number | null>(roomSelectedPoint);
   roomSelectedPointRef.current = roomSelectedPoint;
   const roomPreviewInfoRef = useRef<RoomPreviewInfo>({
@@ -1226,7 +1233,10 @@ export default function ConfigEditor() {
       ? info.points.map((point) => ({ ...point }))
       : rectangleRoomZonePoints(info.size.width, info.size.depth);
     const height = Math.max(0.01, info.size.height);
-    const handleSize = Math.min(0.18, Math.max(0.06, modelDiagonalRef.current * 0.012));
+    const handleSize = Math.min(
+      0.11,
+      Math.max(0.022, Math.min(info.size.width, info.size.depth) * 0.055),
+    );
 
     const root = MeshBuilder.CreateCylinder('room-preview-centre', {
       diameter: handleSize * 1.5,
@@ -1241,6 +1251,7 @@ export default function ConfigEditor() {
     const centreMaterial = new StandardMaterial('room-preview-centre-material', scene);
     centreMaterial.diffuseColor = new Color3(1, 0.72, 0.18);
     centreMaterial.emissiveColor = new Color3(0.48, 0.24, 0.03);
+    centreMaterial.alpha = roomGizmoActiveRef.current && roomSelectedPointRef.current === null ? 1 : 0.72;
     centreMaterial.disableLighting = true;
     centreMaterial.disableDepthWrite = true;
     root.material = centreMaterial;
@@ -1248,12 +1259,12 @@ export default function ConfigEditor() {
 
     const surface = createRoomZoneSurface(scene, 'room-preview-surface', points, height, true);
     surface.parent = root;
-    surface.metadata = { previewTarget: 'roomZone', roomEditorTarget: 'centre' };
+    surface.metadata = { previewTarget: 'roomZone' };
     surface.isPickable = true;
     const surfaceMaterial = new StandardMaterial('room-preview-surface-material', scene);
     surfaceMaterial.diffuseColor = new Color3(0.08, 0.55, 0.82);
     surfaceMaterial.emissiveColor = new Color3(0.04, 0.32, 0.5);
-    surfaceMaterial.alpha = 0.3;
+    surfaceMaterial.alpha = roomGizmoActiveRef.current ? 0.22 : 0.11;
     surfaceMaterial.disableLighting = true;
     surfaceMaterial.backFaceCulling = false;
     surface.material = surfaceMaterial;
@@ -1286,9 +1297,10 @@ export default function ConfigEditor() {
       handle.metadata = { previewTarget: 'roomPoint', roomEditorTarget: 'point', roomPointIndex: index };
       handle.isPickable = true;
       const material = new StandardMaterial(`room-preview-point-material-${index}`, scene);
-      const isSelected = index === selectedPoint;
+      const isSelected = roomGizmoActiveRef.current && index === selectedPoint;
       material.diffuseColor = isSelected ? new Color3(0.98, 0.76, 0.18) : new Color3(0.18, 0.72, 0.96);
       material.emissiveColor = isSelected ? new Color3(0.55, 0.3, 0.02) : new Color3(0.04, 0.3, 0.5);
+      material.alpha = isSelected ? 1 : 0.82;
       material.disableLighting = true;
       material.disableDepthWrite = true;
       handle.material = material;
@@ -1300,6 +1312,8 @@ export default function ConfigEditor() {
     roomPreviewSurfaceRef.current = surface;
     roomPreviewOutlineRef.current = outline;
     roomPreviewPointHandlesRef.current = handles;
+
+    if (!roomGizmoActiveRef.current) return;
 
     if (!utilLayerRef.current) utilLayerRef.current = new UtilityLayerRenderer(scene);
     const activeMode = transformModeRef.current;
@@ -1597,8 +1611,40 @@ export default function ConfigEditor() {
         posUndoStackRef.current.push({ ...positionRef.current });
         const p = worldToConfigPosition(placePick.pickedPoint, modelScaleRef.current);
 
+        if (roomPanelOpenRef.current) {
+          const newPos: LightPosition = { x: p.x, y: p.y, z: p.z };
+          const currentInfo = roomPreviewInfoRef.current;
+          const trace = traceRoomPolygon(
+            ctx.scene,
+            placePick.pickedPoint,
+            modelMeshesRef.current,
+            {
+              modelDiagonal: modelDiagonalRef.current,
+              modelScale: modelScaleRef.current,
+              fallbackWidth: currentInfo.size.width,
+              fallbackDepth: currentInfo.size.depth,
+            },
+          );
+          const nextInfo: RoomPreviewInfo = {
+            size: { ...currentInfo.size, width: trace.width, depth: trace.depth },
+            rotation: { x: 0, y: 0, z: 0 },
+            points: trace.points,
+          };
+          setPosition(newPos);
+          positionRef.current = newPos;
+          roomPreviewInfoRef.current = nextInfo;
+          roomFormRef.current?.applyDetectedPolygon(trace.points);
+          setRoomZoneReady(true);
+          roomZoneReadyRef.current = true;
+          setRoomPointCount(trace.points.length);
+          roomSelectedPointRef.current = null;
+          setRoomSelectedPoint(null);
+          roomGizmoActiveRef.current = false;
+          setRoomGizmoActive(false);
+          updateRoomPreview(newPos, nextInfo);
+          showToast(t(trace.usedFallback ? 'rooms.traceFallback' : 'rooms.traceSuccess', { count: trace.points.length }));
         // Display placing mode: capture normal
-        if (displayPanelOpenRef.current) {
+        } else if (displayPanelOpenRef.current) {
           const faceNormal = placePick.getNormal(true, true);
           const n = faceNormal
             ? { x: parseFloat(faceNormal.x.toFixed(4)), y: parseFloat(faceNormal.y.toFixed(4)), z: parseFloat(faceNormal.z.toFixed(4)) }
@@ -1619,8 +1665,8 @@ export default function ConfigEditor() {
           };
           setPosition(newPos);
           positionRef.current = newPos;
-        } else if (wallPanelOpenRef.current || smartDevicePanelOpenRef.current || roomPanelOpenRef.current) {
-          // Light blockers, device presets, and room centres use the exact picked position.
+        } else if (wallPanelOpenRef.current || smartDevicePanelOpenRef.current) {
+          // Light blockers and device presets use the exact picked position.
           const newPos: LightPosition = {
             x: p.x,
             y: p.y,
@@ -1646,6 +1692,7 @@ export default function ConfigEditor() {
         applyCameraControlSensitivity(ctx.camera);
         ctx.camera.attachControl(canvas, true);
         if (canvas) canvas.style.cursor = 'default';
+        pointerDownPos = null;
         return;
       }
     };
@@ -1706,6 +1753,8 @@ export default function ConfigEditor() {
           }
           roomSelectedPointRef.current = pointIndex;
           setRoomSelectedPoint(pointIndex);
+          roomGizmoActiveRef.current = true;
+          setRoomGizmoActive(true);
           updateRoomPreview(positionRef.current, roomPreviewInfoRef.current);
         }
         return;
@@ -2944,6 +2993,7 @@ export default function ConfigEditor() {
 
   const handleAddRoom = useCallback((area?: HAAreaRegistryEntry) => {
     const anchor = { x: 0, y: 0, z: 0 };
+    const initialPoints = rectangleRoomZonePoints(editorDefaultSizes.wall.width, editorDefaultSizes.wall.depth);
     const draft: RoomConfig = {
       id: generateUUID(),
       name: area?.name ?? t('rooms.newName'),
@@ -2957,10 +3007,20 @@ export default function ConfigEditor() {
       },
       primaryEntityIds: [],
     };
+    roomPreviewInfoRef.current = {
+      size: { width: editorDefaultSizes.wall.width, height: 0.025, depth: editorDefaultSizes.wall.depth },
+      rotation: { x: 0, y: 0, z: 0 },
+      points: initialPoints,
+    };
     setRoomEditIdx(null);
     setRoomDraft(draft);
+    setRoomZoneReady(false);
+    roomZoneReadyRef.current = false;
     setRoomSelectedPoint(null);
     roomSelectedPointRef.current = null;
+    setRoomPointCount(0);
+    setRoomGizmoActive(false);
+    roomGizmoActiveRef.current = false;
     setPosition(anchor);
     positionRef.current = anchor;
     posUndoStackRef.current = [];
@@ -2970,6 +3030,16 @@ export default function ConfigEditor() {
   const handleEditRoom = useCallback((idx: number) => {
     const room = rooms[idx];
     if (!room) return;
+    roomPreviewInfoRef.current = {
+      size: {
+        width: room.zone.width,
+        height: room.zone.height ?? 0.025,
+        depth: room.zone.depth,
+      },
+      rotation: { x: 0, y: room.zone.rotationY ?? 0, z: 0 },
+      points: room.zone.points?.map((point) => ({ ...point }))
+        ?? rectangleRoomZonePoints(room.zone.width, room.zone.depth),
+    };
     setRoomEditIdx(idx);
     setRoomDraft({
       ...room,
@@ -2978,8 +3048,13 @@ export default function ConfigEditor() {
       zone: { ...room.zone },
       primaryEntityIds: [...room.primaryEntityIds],
     });
+    setRoomZoneReady(true);
+    roomZoneReadyRef.current = true;
     setRoomSelectedPoint(null);
     roomSelectedPointRef.current = null;
+    setRoomPointCount(room.zone.points?.length ?? 4);
+    setRoomGizmoActive(false);
+    roomGizmoActiveRef.current = false;
     setPosition(room.anchor);
     positionRef.current = room.anchor;
     posUndoStackRef.current = [];
@@ -3002,8 +3077,12 @@ export default function ConfigEditor() {
     setRoomPanelOpen(false);
     setRoomEditIdx(null);
     setRoomDraft(null);
+    setRoomZoneReady(false);
+    roomZoneReadyRef.current = false;
     setRoomSelectedPoint(null);
     roomSelectedPointRef.current = null;
+    setRoomGizmoActive(false);
+    roomGizmoActiveRef.current = false;
     clearPreview();
     exitPlacingMode();
   }, [clearPreview, exitPlacingMode]);
@@ -3012,13 +3091,17 @@ export default function ConfigEditor() {
   const handleRoomPreviewChange = useCallback((info: RoomPreviewInfo) => {
     roomPreviewInfoRef.current = info;
     setRoomPointCount(info.points.length);
-    if (!roomPanelOpen || draggingGizmoRef.current) return;
+    if (!roomPanelOpen || !roomZoneReadyRef.current || draggingGizmoRef.current) return;
     updateRoomPreview(positionRef.current, info);
   }, [roomPanelOpen, updateRoomPreview]);
 
   const handleSelectRoomCentre = useCallback(() => {
+    transformModeRef.current = 'move';
+    setTransformMode('move');
     roomSelectedPointRef.current = null;
     setRoomSelectedPoint(null);
+    roomGizmoActiveRef.current = true;
+    setRoomGizmoActive(true);
     updateRoomPreview(positionRef.current, roomPreviewInfoRef.current);
   }, [updateRoomPreview]);
 
@@ -3029,6 +3112,8 @@ export default function ConfigEditor() {
     setTransformMode('move');
     roomSelectedPointRef.current = pointIndex;
     setRoomSelectedPoint(pointIndex);
+    roomGizmoActiveRef.current = true;
+    setRoomGizmoActive(true);
   }, []);
 
   const handleRemoveRoomPoint = useCallback(() => {
@@ -3044,6 +3129,8 @@ export default function ConfigEditor() {
     roomFormRef.current?.resetPoints();
     roomSelectedPointRef.current = null;
     setRoomSelectedPoint(null);
+    roomGizmoActiveRef.current = false;
+    setRoomGizmoActive(false);
   }, []);
 
   const handleSaveRoom = useCallback(async (room: RoomConfig) => {
@@ -3058,11 +3145,11 @@ export default function ConfigEditor() {
   }, [handleCloseRoomPanel, roomEditIdx, rooms, showToast, t]);
 
   useEffect(() => {
-    if (!roomPanelOpen) return;
+    if (!roomPanelOpen || !roomZoneReady) return;
     if (draggingGizmoRef.current) return;
     const info = roomPreviewInfoRef.current;
     updateRoomPreview(position, info);
-  }, [position, roomPanelOpen, roomSelectedPoint, updateRoomPreview]);
+  }, [position, roomGizmoActive, roomPanelOpen, roomSelectedPoint, roomZoneReady, updateRoomPreview]);
 
   // ── Tube handlers ──────────────────────────────────────────────
 
@@ -3352,7 +3439,7 @@ export default function ConfigEditor() {
       handleWallPreviewChange(wallPreviewInfoRef.current);
     } else if (smartDevicePanelOpenRef.current) {
       handleSmartDevicePreviewChange(smartDevicePreviewInfoRef.current);
-    } else if (roomPanelOpenRef.current) {
+    } else if (roomPanelOpenRef.current && roomZoneReadyRef.current) {
       updateRoomPreview(positionRef.current, roomPreviewInfoRef.current);
     }
   }, [transformMode]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -3656,30 +3743,32 @@ export default function ConfigEditor() {
         <div className={`mode-banner${placingMode ? ' visible' : ''}`}>
           {displayPanelOpen ? t('editor.placeDisplayBanner') : blindPanelOpen ? t('editor.placeBlindBanner') : wallPanelOpen ? t('editor.placeWallBanner') : smartDevicePanelOpen ? t('editor.placeSmartDeviceBanner') : roomPanelOpen ? t('editor.placeRoomBanner') : t('editor.placeLightBanner')}
         </div>
-        <div className="editor-view-toolbar editor-transform-toolbar" role="toolbar" aria-label={t('editor.transformTools')}>
-          {TRANSFORM_MODES.map((mode) => {
-            const Icon = mode === 'move' ? Move3d : mode === 'rotate' ? Rotate3d : Scale3d;
-            return (
-              <button
-                key={mode}
-                className={`editor-view-tool-btn${transformMode === mode ? ' active' : ''}`}
-                onClick={() => setTransformMode(mode)}
-                aria-label={t(`modelObjects.${mode}`)}
-                aria-pressed={transformMode === mode}
-                title={t(`modelObjects.${mode}`)}
-              >
-                <Icon size={16} strokeWidth={1.8} aria-hidden="true" />
-              </button>
-            );
-          })}
-        </div>
-        {roomPanelOpen && (
+        {(!roomPanelOpen || roomZoneReady) && (
+          <div className="editor-view-toolbar editor-transform-toolbar" role="toolbar" aria-label={t('editor.transformTools')}>
+            {TRANSFORM_MODES.map((mode) => {
+              const Icon = mode === 'move' ? Move3d : mode === 'rotate' ? Rotate3d : Scale3d;
+              return (
+                <button
+                  key={mode}
+                  className={`editor-view-tool-btn${transformMode === mode ? ' active' : ''}`}
+                  onClick={() => setTransformMode(mode)}
+                  aria-label={t(`modelObjects.${mode}`)}
+                  aria-pressed={transformMode === mode}
+                  title={t(`modelObjects.${mode}`)}
+                >
+                  <Icon size={16} strokeWidth={1.8} aria-hidden="true" />
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {roomPanelOpen && roomZoneReady && (
           <div className="editor-view-toolbar editor-room-toolbar" role="toolbar" aria-label={t('rooms.pointTools')}>
             <button
-              className={`editor-view-tool-btn${roomSelectedPoint === null ? ' active' : ''}`}
+              className={`editor-view-tool-btn${roomGizmoActive && roomSelectedPoint === null ? ' active' : ''}`}
               onClick={handleSelectRoomCentre}
               aria-label={t('rooms.selectCentre')}
-              aria-pressed={roomSelectedPoint === null}
+              aria-pressed={roomGizmoActive && roomSelectedPoint === null}
               title={t('rooms.selectCentre')}
             >
               <MapPin size={16} strokeWidth={1.8} aria-hidden="true" />
@@ -3841,6 +3930,7 @@ export default function ConfigEditor() {
           entities={haRoomEntities}
           placedEntityIds={placedEntityIds}
           defaultZone={{ width: editorDefaultSizes.wall.width, height: 0.025, depth: editorDefaultSizes.wall.depth }}
+          hasZone={roomZoneReady}
           placingMode={placingMode}
           onPositionChange={handlePositionChange}
           onPreviewChange={handleRoomPreviewChange}

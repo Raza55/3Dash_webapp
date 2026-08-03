@@ -471,6 +471,11 @@
 
 .btn-success:hover { background: rgba(74,222,128,0.18); }
 
+.btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
 .btn-ghost {
   background: none;
   border-color: var(--border);
