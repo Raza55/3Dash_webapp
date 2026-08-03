@@ -95,6 +95,8 @@ entsprechenden Editor-Funktionen gesetzt.
   werden. In diesem Zustand zeigt die 3D-Ansicht nur Linien und Endpunkte, keine
   künstliche Startfläche; die Erkennung übernimmt und rebasiert diese Grenzen. Ein
   beschrifteter Button im Raum-Panel macht das Werkzeug vor der Erkennung direkt sichtbar.
+- Im Entwicklungsmodus werden alte produktive PWA-Service-Worker automatisch entfernt,
+  damit der lokale Editor nach Änderungen keine veraltete Oberfläche aus dem Cache lädt.
 - Raumflächen auf derselben Höhenebene dürfen sich nicht überlagern. Die Prüfung arbeitet
   mit den tatsächlichen, auch konkaven Polygonen und erlaubt gemeinsame Kanten und Ecken.
   Konflikte werden rot und mit den betroffenen Raumnamen angezeigt; Raum- und globales

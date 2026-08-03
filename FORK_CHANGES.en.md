@@ -95,6 +95,8 @@ are used.
   shows only lines and endpoints, without an artificial starting area; room detection
   keeps and rebases those boundaries. A labelled action in the room panel keeps this
   tool visible and discoverable before detection.
+- Development mode automatically removes stale production PWA service workers so the
+  local editor cannot remain pinned to an outdated cached interface after code changes.
 - Room areas on the same floor cannot overlap. The check uses the actual polygons,
   including concave outlines, while allowing shared edges and corners. Conflicts are
   shown in red with the affected room names, and both room-level and global saving stay
