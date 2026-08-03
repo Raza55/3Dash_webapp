@@ -91,6 +91,11 @@ entsprechenden Editor-Funktionen gesetzt.
   Linie mit Start- und Endpunkt zeichnen. Ihre Endpunkte können einzeln verschoben und
   die komplette Linie kann ausgewählt oder gelöscht werden. Eine erneute Raumerkennung
   behandelt diese endlichen Segmente wie Wände; sie werden dauerhaft pro Raum gespeichert.
+- Raumflächen auf derselben Höhenebene dürfen sich nicht überlagern. Die Prüfung arbeitet
+  mit den tatsächlichen, auch konkaven Polygonen und erlaubt gemeinsame Kanten und Ecken.
+  Konflikte werden rot und mit den betroffenen Raumnamen angezeigt; Raum- und globales
+  Speichern bleiben gesperrt, bis die Überschneidung behoben ist. Andere Etagen bleiben
+  unabhängig voneinander.
 - Solange keine Kontur erkannt wurde, bleiben Transformationswerkzeuge und Speichern
   ausgeblendet beziehungsweise deaktiviert. Erst die anschließende Feinbearbeitung
   blendet kleine Eckpunktgriffe ein; das Gizmo erscheint nur für den gewählten Griff.

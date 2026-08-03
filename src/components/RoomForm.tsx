@@ -40,6 +40,7 @@ interface Props {
   placedEntityIds: ReadonlySet<string>;
   defaultZone: { width: number; height: number; depth: number };
   hasZone: boolean;
+  overlappingRoomNames: string[];
   placingMode: boolean;
   onPositionChange: (position: LightPosition) => void;
   onPreviewChange: (info: RoomPreviewInfo) => void;
@@ -73,7 +74,8 @@ function pointBounds(points: RoomZonePoint[]): { width: number; depth: number } 
 
 const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
   open, room, isNew, position, areas, entities, placedEntityIds, defaultZone, placingMode,
-  hasZone, onPositionChange, onPreviewChange, onEnterPlacingMode, onExitPlacingMode, onSave, onClose,
+  hasZone, overlappingRoomNames, onPositionChange, onPreviewChange, onEnterPlacingMode,
+  onExitPlacingMode, onSave, onClose,
 }, ref) {
   const t = useTranslation();
   const [name, setName] = useState('');
@@ -271,6 +273,10 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
     if (!name.trim()) { alert(t('rooms.nameRequired')); return; }
     if (!areaIds.length) { alert(t('rooms.areaRequired')); return; }
     if (!hasZone) { alert(t('rooms.traceRequired')); return; }
+    if (overlappingRoomNames.length) {
+      alert(t('rooms.overlapBlocked', { rooms: overlappingRoomNames.join(', ') }));
+      return;
+    }
     const rankedIds = roomEntities.map((entity) => entity.entity_id);
     const orderedPrimaryIds = rankedIds.filter((entityId) => primaryEntityIds.includes(entityId));
     onSave({
@@ -298,7 +304,7 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
           ? t('form.cancelPlacement')
           : hasZone ? t('rooms.traceAgain') : t('rooms.traceInModel')}
       </button>
-      <button className="btn btn-success" onClick={handleSave} disabled={!hasZone}>{t('common.save')}</button>
+      <button className="btn btn-success" onClick={handleSave} disabled={!hasZone || overlappingRoomNames.length > 0}>{t('common.save')}</button>
       <button className="btn btn-ghost" onClick={onClose}>{t('common.cancel')}</button>
     </>
   );
@@ -337,6 +343,11 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
               <span>{t('rooms.pointsCount', { count: effectivePoints.length })}</span>
             </div>
             <div className="room-form-note">{t('rooms.pointEditHint')}</div>
+            {overlappingRoomNames.length > 0 && (
+              <div className="room-overlap-warning" role="alert">
+                {t('rooms.overlapWarning', { rooms: overlappingRoomNames.join(', ') })}
+              </div>
+            )}
             {virtualWalls.length > 0 && (
               <div className="room-zone-summary">
                 <span>{t('rooms.virtualWalls')}</span>

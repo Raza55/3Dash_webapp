@@ -91,6 +91,10 @@ are used.
   finite start-to-end lines. Each endpoint can be moved independently, while the whole
   line can be selected or deleted. Re-running room detection treats these segments as
   walls, and they are persisted separately for each room.
+- Room areas on the same floor cannot overlap. The check uses the actual polygons,
+  including concave outlines, while allowing shared edges and corners. Conflicts are
+  shown in red with the affected room names, and both room-level and global saving stay
+  blocked until the overlap is resolved. Rooms on different floors remain independent.
 - Until an outline has been detected, transform tools and saving remain hidden or
   disabled. Fine editing then shows small corner handles, while the gizmo appears only
   for the selected handle.

@@ -30,6 +30,108 @@ export interface RoomZoneLabelEntry {
   labelTexture: DynamicTexture;
 }
 
+const ROOM_FLOOR_TOLERANCE = 0.12;
+
+function roomZoneWorldPoints(room: RoomConfig): RoomZonePoint[] {
+  const angle = Tools.ToRadians(room.zone.rotationY ?? 0);
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  return getRoomZonePoints(room.zone).map((point) => ({
+    x: room.anchor.x + point.x * cosine + point.z * sine,
+    z: room.anchor.z - point.x * sine + point.z * cosine,
+  }));
+}
+
+function polygonBounds(points: RoomZonePoint[]) {
+  const xs = points.map((point) => point.x);
+  const zs = points.map((point) => point.z);
+  return {
+    minX: Math.min(...xs),
+    maxX: Math.max(...xs),
+    minZ: Math.min(...zs),
+    maxZ: Math.max(...zs),
+  };
+}
+
+function triangleProjection(points: RoomZonePoint[], axisX: number, axisZ: number): [number, number] {
+  const values = points.map((point) => point.x * axisX + point.z * axisZ);
+  return [Math.min(...values), Math.max(...values)];
+}
+
+function trianglesOverlapWithArea(
+  first: RoomZonePoint[],
+  second: RoomZonePoint[],
+  epsilon: number,
+): boolean {
+  for (const triangle of [first, second]) {
+    for (let index = 0; index < 3; index++) {
+      const start = triangle[index];
+      const end = triangle[(index + 1) % 3];
+      const edgeX = end.x - start.x;
+      const edgeZ = end.z - start.z;
+      const length = Math.hypot(edgeX, edgeZ);
+      if (length <= epsilon) continue;
+      const axisX = -edgeZ / length;
+      const axisZ = edgeX / length;
+      const [firstMin, firstMax] = triangleProjection(first, axisX, axisZ);
+      const [secondMin, secondMax] = triangleProjection(second, axisX, axisZ);
+      if (Math.min(firstMax, secondMax) - Math.max(firstMin, secondMin) <= epsilon) return false;
+    }
+  }
+  return true;
+}
+
+/** Returns true only for a positive-area overlap. Shared corners and edges are allowed. */
+export function roomZonesOverlap(first: RoomConfig, second: RoomConfig): boolean {
+  if (Math.abs(first.anchor.y - second.anchor.y) > ROOM_FLOOR_TOLERANCE) return false;
+
+  const firstPoints = roomZoneWorldPoints(first);
+  const secondPoints = roomZoneWorldPoints(second);
+  if (firstPoints.length < 3 || secondPoints.length < 3) return false;
+
+  const firstBounds = polygonBounds(firstPoints);
+  const secondBounds = polygonBounds(secondPoints);
+  const span = Math.max(
+    firstBounds.maxX - firstBounds.minX,
+    firstBounds.maxZ - firstBounds.minZ,
+    secondBounds.maxX - secondBounds.minX,
+    secondBounds.maxZ - secondBounds.minZ,
+    1,
+  );
+  const epsilon = span * 1e-6;
+  if (Math.min(firstBounds.maxX, secondBounds.maxX) - Math.max(firstBounds.minX, secondBounds.minX) <= epsilon
+    || Math.min(firstBounds.maxZ, secondBounds.maxZ) - Math.max(firstBounds.minZ, secondBounds.minZ) <= epsilon) {
+    return false;
+  }
+
+  const firstTriangles = triangulateRoomZone(firstPoints);
+  const secondTriangles = triangulateRoomZone(secondPoints);
+  for (let firstIndex = 0; firstIndex < firstTriangles.length; firstIndex += 3) {
+    const firstTriangle = firstTriangles.slice(firstIndex, firstIndex + 3).map((index) => firstPoints[index]);
+    for (let secondIndex = 0; secondIndex < secondTriangles.length; secondIndex += 3) {
+      const secondTriangle = secondTriangles.slice(secondIndex, secondIndex + 3).map((index) => secondPoints[index]);
+      if (trianglesOverlapWithArea(firstTriangle, secondTriangle, epsilon)) return true;
+    }
+  }
+  return false;
+}
+
+export function findOverlappingRooms(room: RoomConfig, rooms: RoomConfig[]): RoomConfig[] {
+  return rooms.filter((candidate) => candidate.id !== room.id && roomZonesOverlap(room, candidate));
+}
+
+export function findOverlappingRoomIds(rooms: RoomConfig[]): Set<string> {
+  const overlappingIds = new Set<string>();
+  for (let firstIndex = 0; firstIndex < rooms.length; firstIndex++) {
+    for (let secondIndex = firstIndex + 1; secondIndex < rooms.length; secondIndex++) {
+      if (!roomZonesOverlap(rooms[firstIndex], rooms[secondIndex])) continue;
+      overlappingIds.add(rooms[firstIndex].id);
+      overlappingIds.add(rooms[secondIndex].id);
+    }
+  }
+  return overlappingIds;
+}
+
 export function removeRoomZoneMesh(map: RoomZoneMeshMap, roomId: string): void {
   const entry = map[roomId];
   if (!entry) return;
@@ -257,6 +359,7 @@ export function createRoomZoneMesh(
   room: RoomConfig,
   parent?: TransformNode,
   selected = false,
+  overlapping = false,
 ): RoomZoneMeshEntry {
   const height = Math.max(0.01, room.zone.height ?? 0.025);
   const points = getRoomZonePoints(room.zone);
@@ -268,17 +371,19 @@ export function createRoomZoneMesh(
   if (parent) zone.parent = parent;
 
   const zoneMaterial = new StandardMaterial(`room-zone-material-${room.id}`, scene);
-  zoneMaterial.diffuseColor = new Color3(0.08, 0.55, 0.82);
-  zoneMaterial.emissiveColor = new Color3(0.04, 0.27, 0.42);
-  zoneMaterial.alpha = selected ? 0.32 : 0.14;
+  zoneMaterial.diffuseColor = overlapping ? new Color3(0.82, 0.12, 0.18) : new Color3(0.08, 0.55, 0.82);
+  zoneMaterial.emissiveColor = overlapping ? new Color3(0.48, 0.03, 0.06) : new Color3(0.04, 0.27, 0.42);
+  zoneMaterial.alpha = overlapping ? 0.3 : selected ? 0.32 : 0.14;
   zoneMaterial.disableLighting = true;
   zoneMaterial.backFaceCulling = false;
   zone.material = zoneMaterial;
   const outline = MeshBuilder.CreateLines(`room-zone-outline-${room.id}`, {
     points: roomZoneOutlinePoints(points, height),
   }, scene);
-  outline.color = selected ? new Color3(0.2, 0.78, 1) : new Color3(0.2, 0.65, 0.9);
-  outline.alpha = selected ? 1 : 0.7;
+  outline.color = overlapping
+    ? new Color3(1, 0.24, 0.3)
+    : selected ? new Color3(0.2, 0.78, 1) : new Color3(0.2, 0.65, 0.9);
+  outline.alpha = overlapping || selected ? 1 : 0.7;
   outline.position.copyFrom(zone.position);
   outline.rotation.copyFrom(zone.rotation);
   outline.metadata = { roomId: room.id };
@@ -304,9 +409,16 @@ export function rebuildAllRoomZones(
   rooms: RoomConfig[],
   parent?: TransformNode,
   selectedRoomId?: string | null,
+  overlappingRoomIds: ReadonlySet<string> = new Set(),
 ): void {
   disposeAllRoomZones(map);
   for (const room of rooms) {
-    map[room.id] = createRoomZoneMesh(scene, room, parent, room.id === selectedRoomId);
+    map[room.id] = createRoomZoneMesh(
+      scene,
+      room,
+      parent,
+      room.id === selectedRoomId,
+      overlappingRoomIds.has(room.id),
+    );
   }
 }

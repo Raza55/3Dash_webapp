@@ -78,6 +78,8 @@ import {
   createRoomZoneLabel,
   createRoomZoneSurface,
   disposeAllRoomZones,
+  findOverlappingRoomIds,
+  findOverlappingRooms,
   rebuildAllRoomZones,
   rectangleRoomZonePoints,
   roomZoneOutlinePoints,
@@ -147,6 +149,31 @@ function roomVirtualWallsToWorld(
     };
   };
   return walls.map((wall) => ({ start: convert(wall.start), end: convert(wall.end) }));
+}
+
+function roomPreviewToConfig(
+  id: string,
+  position: LightPosition,
+  info: RoomPreviewInfo,
+): RoomConfig {
+  return {
+    id,
+    name: info.name,
+    haAreaIds: [],
+    anchor: { ...position },
+    zone: {
+      width: info.size.width,
+      height: info.size.height,
+      depth: info.size.depth,
+      rotationY: info.rotation.y,
+      points: info.points.map((point) => ({ ...point })),
+      virtualWalls: info.virtualWalls.map((wall) => ({
+        start: { ...wall.start },
+        end: { ...wall.end },
+      })),
+    },
+    primaryEntityIds: [],
+  };
 }
 
 function createNanoleafPreviewMesh(scene: Scene, name: string, size: Record<string, number>): Mesh {
@@ -410,6 +437,8 @@ export default function ConfigEditor() {
   const roomsRef = useRef(rooms);
   roomsRef.current = rooms;
   const [roomEditIdx, setRoomEditIdx] = useState<number | null>(null);
+  const roomEditIdxRef = useRef(roomEditIdx);
+  roomEditIdxRef.current = roomEditIdx;
   const [roomPanelOpen, setRoomPanelOpen] = useState(false);
   const roomPanelOpenRef = useRef(roomPanelOpen);
   roomPanelOpenRef.current = roomPanelOpen;
@@ -424,6 +453,9 @@ export default function ConfigEditor() {
   const [roomVirtualWallStartSet, setRoomVirtualWallStartSet] = useState(false);
   const [roomPointCount, setRoomPointCount] = useState(4);
   const [roomGizmoActive, setRoomGizmoActive] = useState(false);
+  const [roomOverlapNames, setRoomOverlapNames] = useState<string[]>([]);
+  const roomOverlapNamesRef = useRef<string[]>(roomOverlapNames);
+  roomOverlapNamesRef.current = roomOverlapNames;
   const roomGizmoActiveRef = useRef(roomGizmoActive);
   roomGizmoActiveRef.current = roomGizmoActive;
   const roomSelectedPointRef = useRef<number | null>(roomSelectedPoint);
@@ -445,6 +477,8 @@ export default function ConfigEditor() {
   });
   const handleCloseRoomPanelRef = useRef<() => void>(() => {});
   const handleCancelRoomVirtualWallDrawingRef = useRef<() => void>(() => {});
+
+  const overlappingRoomIds = useMemo(() => findOverlappingRoomIds(rooms), [rooms]);
 
   const placedEntityIds = useMemo(() => {
     const ids = new Set<string>();
@@ -1291,6 +1325,28 @@ export default function ConfigEditor() {
     [clearPreview, flushGizmoPosition, scheduleGizmoPosition],
   );
 
+  const evaluateRoomOverlaps = useCallback((pos: LightPosition, info: RoomPreviewInfo): string[] => {
+    if (!roomZoneReadyRef.current) {
+      if (roomOverlapNamesRef.current.length) {
+        roomOverlapNamesRef.current = [];
+        setRoomOverlapNames([]);
+      }
+      return [];
+    }
+    const editedRoom = roomEditIdxRef.current === null
+      ? null
+      : roomsRef.current[roomEditIdxRef.current] ?? null;
+    const previewRoom = roomPreviewToConfig(editedRoom?.id ?? '__room-preview__', pos, info);
+    const names = findOverlappingRooms(previewRoom, roomsRef.current).map((room) => room.name);
+    const unchanged = names.length === roomOverlapNamesRef.current.length
+      && names.every((name, index) => name === roomOverlapNamesRef.current[index]);
+    if (!unchanged) {
+      roomOverlapNamesRef.current = names;
+      setRoomOverlapNames(names);
+    }
+    return names;
+  }, []);
+
   const updateRoomPreview = useCallback((pos: LightPosition, info: RoomPreviewInfo) => {
     const scene = sceneCtxRef.current?.scene;
     if (!scene) return;
@@ -1300,6 +1356,7 @@ export default function ConfigEditor() {
       ? info.points.map((point) => ({ ...point }))
       : rectangleRoomZonePoints(info.size.width, info.size.depth);
     const height = Math.max(0.01, info.size.height);
+    const hasOverlap = evaluateRoomOverlaps(pos, info).length > 0;
     const handleSize = Math.min(
       0.11,
       Math.max(0.022, Math.min(info.size.width, info.size.depth) * 0.055),
@@ -1333,9 +1390,9 @@ export default function ConfigEditor() {
     surface.metadata = { previewTarget: 'roomZone' };
     surface.isPickable = true;
     const surfaceMaterial = new StandardMaterial('room-preview-surface-material', scene);
-    surfaceMaterial.diffuseColor = new Color3(0.08, 0.55, 0.82);
-    surfaceMaterial.emissiveColor = new Color3(0.04, 0.32, 0.5);
-    surfaceMaterial.alpha = roomGizmoActiveRef.current ? 0.22 : 0.11;
+    surfaceMaterial.diffuseColor = hasOverlap ? new Color3(0.82, 0.12, 0.18) : new Color3(0.08, 0.55, 0.82);
+    surfaceMaterial.emissiveColor = hasOverlap ? new Color3(0.48, 0.03, 0.06) : new Color3(0.04, 0.32, 0.5);
+    surfaceMaterial.alpha = hasOverlap ? 0.34 : roomGizmoActiveRef.current ? 0.22 : 0.11;
     surfaceMaterial.disableLighting = true;
     surfaceMaterial.backFaceCulling = false;
     surface.material = surfaceMaterial;
@@ -1345,10 +1402,17 @@ export default function ConfigEditor() {
       updatable: true,
     }, scene);
     outline.parent = root;
-    outline.color = new Color3(0.25, 0.82, 1);
+    outline.color = hasOverlap ? new Color3(1, 0.24, 0.3) : new Color3(0.25, 0.82, 1);
     outline.alpha = 1;
     outline.isPickable = false;
     outline.metadata = { previewTarget: 'roomOutline' };
+
+    const applyOverlapStyle = (overlapping: boolean) => {
+      surfaceMaterial.diffuseColor = overlapping ? new Color3(0.82, 0.12, 0.18) : new Color3(0.08, 0.55, 0.82);
+      surfaceMaterial.emissiveColor = overlapping ? new Color3(0.48, 0.03, 0.06) : new Color3(0.04, 0.32, 0.5);
+      surfaceMaterial.alpha = overlapping ? 0.34 : roomGizmoActiveRef.current ? 0.22 : 0.11;
+      outline.color = overlapping ? new Color3(1, 0.24, 0.3) : new Color3(0.25, 0.82, 1);
+    };
 
     const selectedVirtualWallEndpoint = roomSelectedVirtualWallEndpointRef.current
       && roomSelectedVirtualWallEndpointRef.current.wallIndex < info.virtualWalls.length
@@ -1517,6 +1581,7 @@ export default function ConfigEditor() {
         points: roomZoneOutlinePoints(nextPoints, height),
         instance: outline,
       }, scene);
+      applyOverlapStyle(evaluateRoomOverlaps(positionRef.current, roomPreviewInfoRef.current).length > 0);
     };
 
     const updateDraggedVirtualWallEndpoint = () => {
@@ -1550,6 +1615,23 @@ export default function ConfigEditor() {
       }
     });
     gizmo.onDragObservable.add(() => {
+      if (attached === root) {
+        const transformedInfo: RoomPreviewInfo = activeMode === 'scale'
+          ? {
+            ...roomPreviewInfoRef.current,
+            points: roomPreviewInfoRef.current.points.map((point) => ({
+              x: point.x * Math.max(0.001, root.scaling.x),
+              z: point.z * Math.max(0.001, root.scaling.z),
+            })),
+          }
+          : activeMode === 'rotate'
+            ? { ...roomPreviewInfoRef.current, rotation: rotationFromMesh(root) }
+            : roomPreviewInfoRef.current;
+        const previewPosition = activeMode === 'move'
+          ? { x: root.position.x, y: root.position.y, z: root.position.z }
+          : positionRef.current;
+        applyOverlapStyle(evaluateRoomOverlaps(previewPosition, transformedInfo).length > 0);
+      }
       if (activeMode !== 'move') return;
       if (selectedVirtualWallEndpoint !== null) {
         updateDraggedVirtualWallEndpoint();
@@ -1598,7 +1680,7 @@ export default function ConfigEditor() {
     });
     setUtilityMeshAlpha(utilLayerRef.current, 0.55);
     gizmoRef.current = gizmo;
-  }, [clearPreview, flushGizmoPosition, scheduleGizmoPosition]);
+  }, [clearPreview, evaluateRoomOverlaps, flushGizmoPosition, scheduleGizmoPosition]);
 
   const clearRoomVirtualWallDraft = useCallback(() => {
     roomVirtualWallDraftLineRef.current?.dispose();
@@ -2344,8 +2426,9 @@ export default function ConfigEditor() {
       visibleRooms,
       entityScaleRootRef.current ?? undefined,
       roomEditIdx !== null ? rooms[roomEditIdx]?.id : null,
+      overlappingRoomIds,
     );
-  }, [editorMode, roomEditIdx, roomPanelOpen, rooms]);
+  }, [editorMode, overlappingRoomIds, roomEditIdx, roomPanelOpen, rooms]);
 
   // Keyboard shortcuts: Ctrl+Z undo, Escape close panel
   useEffect(() => {
@@ -3422,6 +3505,7 @@ export default function ConfigEditor() {
       virtualWalls: [],
     };
     setRoomEditIdx(null);
+    roomEditIdxRef.current = null;
     setRoomDraft(draft);
     setRoomZoneReady(false);
     roomZoneReadyRef.current = false;
@@ -3434,6 +3518,8 @@ export default function ConfigEditor() {
     setRoomPointCount(0);
     setRoomGizmoActive(false);
     roomGizmoActiveRef.current = false;
+    setRoomOverlapNames([]);
+    roomOverlapNamesRef.current = [];
     setPosition(anchor);
     positionRef.current = anchor;
     posUndoStackRef.current = [];
@@ -3459,6 +3545,7 @@ export default function ConfigEditor() {
       })) ?? [],
     };
     setRoomEditIdx(idx);
+    roomEditIdxRef.current = idx;
     setRoomDraft({
       ...room,
       haAreaIds: [...room.haAreaIds],
@@ -3484,6 +3571,8 @@ export default function ConfigEditor() {
     setRoomPointCount(room.zone.points?.length ?? 4);
     setRoomGizmoActive(false);
     roomGizmoActiveRef.current = false;
+    setRoomOverlapNames([]);
+    roomOverlapNamesRef.current = [];
     setPosition(room.anchor);
     positionRef.current = room.anchor;
     posUndoStackRef.current = [];
@@ -3506,6 +3595,7 @@ export default function ConfigEditor() {
     handleCancelRoomVirtualWallDrawingRef.current();
     setRoomPanelOpen(false);
     setRoomEditIdx(null);
+    roomEditIdxRef.current = null;
     setRoomDraft(null);
     setRoomZoneReady(false);
     roomZoneReadyRef.current = false;
@@ -3517,6 +3607,8 @@ export default function ConfigEditor() {
     roomSelectedVirtualWallEndpointRef.current = null;
     setRoomGizmoActive(false);
     roomGizmoActiveRef.current = false;
+    setRoomOverlapNames([]);
+    roomOverlapNamesRef.current = [];
     clearPreview();
     exitPlacingMode();
   }, [clearPreview, exitPlacingMode]);
@@ -3627,6 +3719,14 @@ export default function ConfigEditor() {
   }, [showToast, t, updateRoomPreview]);
 
   const handleSaveRoom = useCallback(async (room: RoomConfig) => {
+    const conflicts = findOverlappingRooms(room, rooms);
+    if (conflicts.length) {
+      const names = conflicts.map((conflict) => conflict.name);
+      roomOverlapNamesRef.current = names;
+      setRoomOverlapNames(names);
+      showToast(t('rooms.overlapBlocked', { rooms: names.join(', ') }));
+      return;
+    }
     const updated = roomEditIdx === null
       ? [...rooms, room]
       : rooms.map((current, index) => index === roomEditIdx ? room : current);
@@ -3939,13 +4039,19 @@ export default function ConfigEditor() {
 
   // Save config to server
   const handleSaveConfig = useCallback(async () => {
+    if (overlappingRoomIds.size) {
+      const names = rooms.filter((room) => overlappingRoomIds.has(room.id)).map((room) => room.name);
+      showToast(t('rooms.overlapBlocked', { rooms: names.join(', ') }));
+      setEditorMode('rooms');
+      return;
+    }
     try {
       await updateConfig({ lights, lightGroups, blinds, displays, shadowWalls, smartDevices, tubes, rooms });
       showToast(t('editor.savedSummary', { lights: lights.length, blinds: blinds.length, displays: displays.length, walls: shadowWalls.length, devices: smartDevices.length, tubes: tubes.length, rooms: rooms.length }));
     } catch (e) {
       alert(t('editor.saveConfigFailed', { message: e instanceof Error ? e.message : String(e) }));
     }
-  }, [lights, lightGroups, blinds, displays, shadowWalls, smartDevices, tubes, rooms, showToast, t]);
+  }, [lights, lightGroups, blinds, displays, overlappingRoomIds, shadowWalls, smartDevices, tubes, rooms, showToast, t]);
 
   // Load config from server
   const handleLoadConfig = useCallback(async () => {
@@ -4444,6 +4550,7 @@ export default function ConfigEditor() {
           placedEntityIds={placedEntityIds}
           defaultZone={{ width: editorDefaultSizes.wall.width, height: 0.025, depth: editorDefaultSizes.wall.depth }}
           hasZone={roomZoneReady}
+          overlappingRoomNames={roomOverlapNames}
           placingMode={placingMode}
           onPositionChange={handlePositionChange}
           onPreviewChange={handleRoomPreviewChange}
