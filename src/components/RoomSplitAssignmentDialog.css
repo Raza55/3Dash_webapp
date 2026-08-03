@@ -129,6 +129,17 @@
   line-height: 1.5;
 }
 
+.room-split-dialog-error {
+  margin-top: 14px;
+  padding: 10px 12px;
+  color: #ffb4b4;
+  background: rgba(190, 39, 50, 0.16);
+  border: 1px solid rgba(255, 126, 136, 0.38);
+  border-radius: 5px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .room-split-dialog-footer {
   display: flex;
   justify-content: flex-end;

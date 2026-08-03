@@ -15,6 +15,7 @@ interface Props {
   options: RoomSplitTargetOption[];
   sourceTargetKey: string | null;
   sourceRoomName: string;
+  errorMessage?: string | null;
   onAssignmentChange: (pieceIndex: number, target: string) => void;
   onConfirm: () => void;
   onCancel: () => void;
@@ -28,6 +29,7 @@ export default function RoomSplitAssignmentDialog({
   options,
   sourceTargetKey,
   sourceRoomName,
+  errorMessage,
   onAssignmentChange,
   onConfirm,
   onCancel,
@@ -130,6 +132,11 @@ export default function RoomSplitAssignmentDialog({
           {hasDuplicate && (
             <div className="room-split-dialog-warning" role="alert">
               {t('rooms.splitDuplicateTarget')}
+            </div>
+          )}
+          {errorMessage && (
+            <div className="room-split-dialog-error" role="alert">
+              {errorMessage}
             </div>
           )}
         </div>

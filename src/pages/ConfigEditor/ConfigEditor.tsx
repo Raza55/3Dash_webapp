@@ -86,6 +86,7 @@ import {
   rectangleRoomZonePoints,
   ROOM_FLOOR_TOLERANCE,
   roomZoneOutlinePoints,
+  roomZonesOverlap,
   setRoomZoneLabelVisibility,
   updateRoomZoneSurface,
   type RoomZoneMeshMap,
@@ -480,6 +481,7 @@ export default function ConfigEditor() {
   const [roomSplitStartSet, setRoomSplitStartSet] = useState(false);
   const [roomSplitPieces, setRoomSplitPieces] = useState<RoomZonePoint[][]>([]);
   const [roomSplitAssignments, setRoomSplitAssignments] = useState<string[]>([]);
+  const [roomSplitError, setRoomSplitError] = useState<string | null>(null);
   const [roomPointCount, setRoomPointCount] = useState(4);
   const [roomGizmoActive, setRoomGizmoActive] = useState(false);
   const [roomOverlapNames, setRoomOverlapNames] = useState<string[]>([]);
@@ -1945,6 +1947,7 @@ export default function ConfigEditor() {
     setRoomSplitStartSet(false);
     setRoomSplitPieces([]);
     setRoomSplitAssignments([]);
+    setRoomSplitError(null);
     clearRoomSplitDraft();
     const ctx = sceneCtxRef.current;
     if (ctx && canvasRef.current) {
@@ -2190,6 +2193,7 @@ export default function ConfigEditor() {
 
       roomSplitPiecesRef.current = pieces;
       setRoomSplitPieces(pieces);
+      setRoomSplitError(null);
       const sourceIndex = roomEditIdxRef.current;
       const source = sourceIndex === null ? roomDraftRef.current : roomsRef.current[sourceIndex] ?? null;
       const sourceTarget = source
@@ -4082,6 +4086,7 @@ export default function ConfigEditor() {
   }, [showToast, t, updateRoomPreview]);
 
   const handleRoomSplitAssignmentChange = useCallback((pieceIndex: number, target: string) => {
+    setRoomSplitError(null);
     setRoomSplitAssignments((current) => current.map((value, index) => (
       index === pieceIndex ? target : value
     )));
@@ -4090,11 +4095,14 @@ export default function ConfigEditor() {
   const handleApplyRoomSplitAssignments = useCallback(async () => {
     const pieces = roomSplitPiecesRef.current;
     const assignments = roomSplitAssignments;
+    setRoomSplitError(null);
     if (!pieces.length
       || assignments.length !== pieces.length
       || assignments.some((target) => !target)
       || new Set(assignments).size !== assignments.length) {
-      showToast(t('rooms.splitAssignmentRequired'));
+      const message = t('rooms.splitAssignmentRequired');
+      setRoomSplitError(message);
+      showToast(message);
       return;
     }
 
@@ -4131,7 +4139,9 @@ export default function ConfigEditor() {
         const roomId = target.slice('room:'.length);
         const existing = roomsRef.current.find((room) => room.id === roomId);
         if (!existing) {
-          showToast(t('rooms.splitTargetUnavailable'));
+          const message = t('rooms.splitTargetUnavailable');
+          setRoomSplitError(message);
+          showToast(message);
           return;
         }
         replacements.set(existing.id, withSplitGeometry(existing, piece));
@@ -4139,7 +4149,9 @@ export default function ConfigEditor() {
       }
       if (target.startsWith('draft:')) {
         if (!sourceDraft || target !== `draft:${sourceDraft.id}`) {
-          showToast(t('rooms.splitTargetUnavailable'));
+          const message = t('rooms.splitTargetUnavailable');
+          setRoomSplitError(message);
+          showToast(message);
           return;
         }
         additions.push(withSplitGeometry({
@@ -4152,7 +4164,9 @@ export default function ConfigEditor() {
         const areaId = target.slice('area:'.length);
         const area = haAreas.find((candidate) => candidate.area_id === areaId);
         if (!area) {
-          showToast(t('rooms.splitTargetUnavailable'));
+          const message = t('rooms.splitTargetUnavailable');
+          setRoomSplitError(message);
+          showToast(message);
           return;
         }
         const primaryEntityIds = rankRoomEntities(
@@ -4173,7 +4187,9 @@ export default function ConfigEditor() {
         }, piece));
         continue;
       }
-      showToast(t('rooms.splitTargetUnavailable'));
+      const message = t('rooms.splitTargetUnavailable');
+      setRoomSplitError(message);
+      showToast(message);
       return;
     }
 
@@ -4187,12 +4203,39 @@ export default function ConfigEditor() {
       else updated[existingIndex] = room;
     }
 
-    const conflictIds = findOverlappingRoomIds(updated);
+    const changedRoomIds = new Set([
+      ...replacements.keys(),
+      ...additions.map((room) => room.id),
+    ]);
+    const legacySourceOverlapIds = new Set(
+      sourceExistingRoom
+        ? findOverlappingRooms(sourceExistingRoom, roomsRef.current).map((room) => room.id)
+        : [],
+    );
+    const conflictIds = new Set<string>();
+    for (let firstIndex = 0; firstIndex < updated.length; firstIndex++) {
+      for (let secondIndex = firstIndex + 1; secondIndex < updated.length; secondIndex++) {
+        const first = updated[firstIndex];
+        const second = updated[secondIndex];
+        if (!roomZonesOverlap(first, second)) continue;
+        const firstChanged = changedRoomIds.has(first.id);
+        const secondChanged = changedRoomIds.has(second.id);
+        if (!firstChanged && !secondChanged) continue;
+        if (firstChanged !== secondChanged && sourceExistingRoom) {
+          const unchangedRoom = firstChanged ? second : first;
+          if (legacySourceOverlapIds.has(unchangedRoom.id)) continue;
+        }
+        conflictIds.add(first.id);
+        conflictIds.add(second.id);
+      }
+    }
     if (conflictIds.size) {
       const conflictNames = updated
         .filter((room) => conflictIds.has(room.id))
         .map((room) => room.name);
-      showToast(t('rooms.overlapBlocked', { rooms: conflictNames.join(', ') }));
+      const message = t('rooms.overlapBlocked', { rooms: conflictNames.join(', ') });
+      setRoomSplitError(message);
+      showToast(message);
       return;
     }
 
@@ -5064,6 +5107,7 @@ export default function ConfigEditor() {
           options={roomSplitTargetOptions}
           sourceTargetKey={roomSplitSourceTargetKey}
           sourceRoomName={roomSplitSourceRoom?.name ?? t('rooms.newName')}
+          errorMessage={roomSplitError}
           onAssignmentChange={handleRoomSplitAssignmentChange}
           onConfirm={() => { void handleApplyRoomSplitAssignments(); }}
           onCancel={cancelRoomSplit}

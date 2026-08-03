@@ -107,6 +107,9 @@ are used.
   an existing configured room or be assigned to an unassigned Home Assistant area.
   Unassigned areas become new rooms with prioritised entities. The source room is
   removed when none of the resulting parts is assigned to it.
+- Shared split edges do not count as overlaps. Existing conflicts that are unchanged by
+  the split no longer block assignment again, while newly introduced overlaps are shown
+  directly in the assignment dialog.
 - Until an outline has been detected, transform tools and saving remain hidden or
   disabled. Fine editing then shows small corner handles, while the gizmo appears only
   for the selected handle.

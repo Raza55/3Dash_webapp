@@ -110,6 +110,9 @@ entsprechenden Editor-Funktionen gesetzt.
   alte Fläche dadurch ersetzt wird, oder einem noch freien Home-Assistant-Bereich.
   Freie Bereiche werden als neue Räume samt priorisierter Entities angelegt. Der
   Quellraum wird entfernt, falls ihm kein Teil zugewiesen wird.
+- Gemeinsame Schnittkanten gelten nicht als Überschneidung. Bereits vorher vorhandene,
+  durch den Schnitt unveränderte Konflikte blockieren die Zuordnung nicht erneut;
+  neu entstehende Überschneidungen werden direkt im Zuordnungsdialog angezeigt.
 - Solange keine Kontur erkannt wurde, bleiben Transformationswerkzeuge und Speichern
   ausgeblendet beziehungsweise deaktiviert. Erst die anschließende Feinbearbeitung
   blendet kleine Eckpunktgriffe ein; das Gizmo erscheint nur für den gewählten Griff.

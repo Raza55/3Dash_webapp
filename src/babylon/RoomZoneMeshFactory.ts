@@ -11,7 +11,18 @@ import {
   type Scene,
   type TransformNode,
 } from '@babylonjs/core';
+import * as polygonClippingModule from 'polygon-clipping';
+import type { MultiPolygon, Polygon } from 'polygon-clipping';
 import type { RoomConfig, RoomZone, RoomZonePoint } from '../types';
+
+type PolygonClippingApi = {
+  intersection: (subject: Polygon, ...clips: Polygon[]) => MultiPolygon;
+};
+
+const polygonClipping = (
+  (polygonClippingModule as unknown as { default?: PolygonClippingApi }).default
+  ?? polygonClippingModule
+) as PolygonClippingApi;
 
 export interface RoomZoneMeshEntry {
   zone: Mesh;
@@ -81,6 +92,28 @@ function trianglesOverlapWithArea(
   return true;
 }
 
+function toClippingPolygon(points: RoomZonePoint[]): Polygon {
+  return [[...points.map((point) => [point.x, point.z] as [number, number]), [points[0].x, points[0].z]]];
+}
+
+function clippingRingArea(ring: number[][]): number {
+  let area = 0;
+  for (let index = 0; index < ring.length - 1; index++) {
+    const current = ring[index];
+    const next = ring[index + 1];
+    area += current[0] * next[1] - next[0] * current[1];
+  }
+  return Math.abs(area / 2);
+}
+
+function clippingMultiPolygonArea(multiPolygon: MultiPolygon): number {
+  return multiPolygon.reduce((total, polygon) => {
+    const outerArea = clippingRingArea(polygon[0] ?? []);
+    const holesArea = polygon.slice(1).reduce((sum, ring) => sum + clippingRingArea(ring), 0);
+    return total + Math.max(0, outerArea - holesArea);
+  }, 0);
+}
+
 /** Returns true only for a positive-area overlap. Shared corners and edges are allowed. */
 export function roomZonesOverlap(first: RoomConfig, second: RoomConfig): boolean {
   if (Math.abs(first.anchor.y - second.anchor.y) > ROOM_FLOOR_TOLERANCE) return false;
@@ -102,6 +135,17 @@ export function roomZonesOverlap(first: RoomConfig, second: RoomConfig): boolean
   if (Math.min(firstBounds.maxX, secondBounds.maxX) - Math.max(firstBounds.minX, secondBounds.minX) <= epsilon
     || Math.min(firstBounds.maxZ, secondBounds.maxZ) - Math.max(firstBounds.minZ, secondBounds.minZ) <= epsilon) {
     return false;
+  }
+
+  try {
+    const intersection = polygonClipping.intersection(
+      toClippingPolygon(firstPoints),
+      toClippingPolygon(secondPoints),
+    );
+    const areaTolerance = Math.max(span * span * 1e-8, 1e-10);
+    return clippingMultiPolygonArea(intersection) > areaTolerance;
+  } catch (error) {
+    console.warn('[Rooms] Falling back to triangle overlap detection:', error);
   }
 
   const firstTriangles = triangulateRoomZone(firstPoints);
