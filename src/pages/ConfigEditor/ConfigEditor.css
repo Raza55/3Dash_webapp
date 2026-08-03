@@ -83,7 +83,7 @@
 /* Editor mode tabs */
 .editor-tabs {
   display: grid;
-  grid-template-columns: repeat(7, minmax(44px, 1fr));
+  grid-template-columns: repeat(8, minmax(44px, 1fr));
   border-bottom: 1px solid var(--border);
 }
 
@@ -123,6 +123,47 @@
   font-size: 9px;
   line-height: 1;
   text-align: left;
+}
+
+@media (max-width: 1100px) {
+  .editor-sidebar {
+    width: 46vw;
+    min-width: 300px;
+  }
+
+  .editor-tabs {
+    grid-template-columns: repeat(8, minmax(32px, 1fr));
+  }
+
+  .editor-tab {
+    min-height: 48px;
+    gap: 0;
+  }
+
+  .editor-tab svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  .editor-tab-count {
+    display: none;
+  }
+
+  .form-panel {
+    width: min(450px, 100%);
+  }
+
+  .config-editor:has(.editor-canvas.form-open) .editor-sidebar {
+    display: none;
+  }
+
+  .editor-canvas.form-open .editor-transform-toolbar {
+    z-index: 12;
+  }
+
+  .editor-canvas.form-open .editor-render-toolbar {
+    display: none;
+  }
 }
 
 .smart-device-group + .smart-device-group { margin-top: 12px; }

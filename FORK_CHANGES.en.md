@@ -68,6 +68,24 @@ are used.
   fully off.
 - IR/remote lights can map modes and colors through additional entities.
 
+## Rooms and Home Assistant Areas
+
+- The editor includes a dedicated `Rooms` category that reads Home Assistant area,
+  device, and entity registries through the WebSocket API without modifying HA.
+- Unconfigured HA areas can be added directly from the room list, and one visual room
+  can combine multiple HA areas when needed.
+- Each room has a centre that can be placed in the 3D model and an adjustable,
+  rotatable floor area. The global Move, Rotate, and Scale tools also apply to rooms.
+- Assigned entities are ranked by Safety, Primary Controls, Climate, Media, and Room
+  Status. Diagnostic, configuration, disabled, and hidden entities are omitted by
+  default.
+- Entities already placed as lights, blinds, screens, smart-home devices, or energy
+  flows are detected automatically and receive a higher recommendation priority.
+- Key entities can be selected individually for each room and are stored in a stable
+  order in the application configuration.
+- In narrow editor windows, the object list steps aside while a form is open so the
+  3D surface, transform tools, and form remain usable together.
+
 ## Blinds and Cover Entities
 
 - The Blinds category connects rectangular 3D blinds to Home Assistant entities in
@@ -126,7 +144,7 @@ are used.
 ## Data, Backup, and Compatibility
 
 - The configuration includes optional blocks for model scaling, subobject overrides,
-  imported objects, blinds, smart-home devices, light fixtures, touch zones, and
+  imported objects, blinds, smart-home devices, light fixtures, touch zones, rooms, and
   energy-flow types.
 - Configuration and settings continue to be stored in the browser. Large model files
   are stored in IndexedDB.

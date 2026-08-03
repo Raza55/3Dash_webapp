@@ -1,6 +1,6 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Activity, Box, BrickWall, Crosshair, Image as ImageIcon, ImageOff, LampCeiling, Monitor, Move3d, PanelTopClose, Rotate3d, Scale3d, Cpu } from 'lucide-react';
+import { Activity, Box, BrickWall, Crosshair, House, Image as ImageIcon, ImageOff, LampCeiling, Monitor, Move3d, PanelTopClose, Rotate3d, Scale3d, Cpu } from 'lucide-react';
 import { generateUUID } from '../../utils/uuid';
 import {
   Vector3,
@@ -54,7 +54,6 @@ import {
 import { deleteModelObjectAsset, getConfig, getModelBlob, getModelObjectBlob, updateConfig, uploadModelObject } from '../../services/configApi';
 import { getSetting, updateSettings } from '../../services/settingsStore';
 import { getEntityCache, setEntityCache } from '../../services/entityCache';
-import { HAConnection } from '../../services/haWebSocket';
 import type { HAEntityOption } from '../../components/EntityPicker';
 import LightList from '../../components/LightList';
 import LightForm, { type PreviewInfo, type LightFormHandle } from '../../components/LightForm';
@@ -66,18 +65,22 @@ import ShadowWallList from '../../components/ShadowWallList';
 import ShadowWallForm, { type ShadowWallFormHandle, type WallPreviewInfo } from '../../components/ShadowWallForm';
 import SmartDeviceList from '../../components/SmartDeviceList';
 import SmartDeviceForm, { type SmartDeviceFormHandle, type SmartDevicePreviewInfo } from '../../components/SmartDeviceForm';
+import RoomList from '../../components/RoomList';
+import RoomForm, { type RoomFormHandle, type RoomPreviewInfo } from '../../components/RoomForm';
 import { arrayMove } from '@dnd-kit/sortable';
 import TubeList from '../../components/TubeList';
 import TubeForm, { type TubePreviewInfo } from '../../components/TubeForm';
 import ModelObjectList, { type ModelObjectEditMode, type ModelObjectListItem } from '../../components/ModelObjectList';
 import { createTubeMeshes, removeTubeMeshes, disposeAllTubes, renderMockupLabels, type TubeMap } from '../../babylon/TubeMeshFactory';
 import { createSmartDeviceMesh, rebuildAllSmartDeviceMeshes, removeSmartDeviceMesh, type SmartDeviceMeshMap } from '../../babylon/SmartDeviceMeshFactory';
+import { disposeAllRoomZones, rebuildAllRoomZones, type RoomZoneMeshMap } from '../../babylon/RoomZoneMeshFactory';
 import { createSceneScaleRoot, getModelScale, worldToConfigPosition } from '../../babylon/SceneScale';
 import { sceneRelativeDefaults, type SceneRelativeDefaults } from '../../utils/editorControls';
 import { useTranslation } from '../../contexts/LanguageContext';
 import GuidedTour from '../../components/GuidedTour/GuidedTour';
 import { editorTourSteps } from '../../components/GuidedTour/tourSteps';
-import type { LightConfig, LightGroup, DisplayConfig, BlindConfig, ShadowWallConfig, SmartDeviceConfig, TubeConfig, LightPosition, HAState, ImportedModelObjectConfig, ModelObjectOverride, ModelObjectTransform } from '../../types';
+import { discoverHAAreas, type HAAreaRegistryEntry, type HARoomEntity } from '../../services/haAreaRegistry';
+import type { LightConfig, LightGroup, DisplayConfig, BlindConfig, ShadowWallConfig, SmartDeviceConfig, TubeConfig, LightPosition, ImportedModelObjectConfig, ModelObjectOverride, ModelObjectTransform, RoomConfig } from '../../types';
 import './ConfigEditor.css';
 
 type ActiveGizmo = PositionGizmo | RotationGizmo | ScaleGizmo;
@@ -250,9 +253,13 @@ export default function ConfigEditor() {
   const blindFormRef = useRef<BlindFormHandle>(null);
   const wallFormRef = useRef<ShadowWallFormHandle>(null);
   const smartDeviceFormRef = useRef<SmartDeviceFormHandle>(null);
+  const roomFormRef = useRef<RoomFormHandle>(null);
   const tubeAnchorRef = useRef<Mesh | null>(null);
 
   const [haEntities, setHaEntities] = useState<HAEntityOption[]>(() => getEntityCache());
+  const [haAreas, setHaAreas] = useState<HAAreaRegistryEntry[]>([]);
+  const [haRoomEntities, setHaRoomEntities] = useState<HARoomEntity[]>([]);
+  const [haAreaSyncStatus, setHaAreaSyncStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [lights, setLights] = useState<LightConfig[]>([]);
   const [lightGroups, setLightGroups] = useState<LightGroup[]>([]);
   const [editIdx, setEditIdx] = useState<number | null>(null);
@@ -265,7 +272,7 @@ export default function ConfigEditor() {
   const [showTextures, setShowTextures] = useState(() => getSetting('render').showTextures);
 
   // Editor mode: placed entities, light blockers, tubes, or imported model objects
-  const [editorMode, setEditorMode] = useState<'lights' | 'blinds' | 'displays' | 'walls' | 'smartDevices' | 'tubes' | 'modelObjects'>('lights');
+  const [editorMode, setEditorMode] = useState<'lights' | 'blinds' | 'displays' | 'walls' | 'smartDevices' | 'tubes' | 'rooms' | 'modelObjects'>('lights');
   const editorModeRef = useRef(editorMode);
   editorModeRef.current = editorMode;
   const [modelObjects, setModelObjects] = useState<ModelObjectListItem[]>([]);
@@ -278,28 +285,6 @@ export default function ConfigEditor() {
   const modelObjectOverridesRef = useRef<ModelObjectOverride[]>([]);
   const importedModelObjectsRef = useRef<ImportedModelObjectConfig[]>([]);
   const modelObjectPersistTimerRef = useRef<number | null>(null);
-
-  // Load HA entity list for autocomplete in forms (cache-first, else fetch fresh).
-  useEffect(() => {
-    if (haEntities.length > 0) return;
-    const { mode, haSettings } = getSetting('connection');
-    if (mode !== 'live' || !haSettings.url || !haSettings.token) return;
-    const conn = new HAConnection(
-      { url: haSettings.url, port: haSettings.port, token: haSettings.token },
-      {
-        onInitialStates: (states: HAState[]) => {
-          const entities: HAEntityOption[] = states
-            .map(s => ({ entity_id: s.entity_id, friendly_name: s.attributes.friendly_name as string | undefined }))
-            .sort((a, b) => a.entity_id.localeCompare(b.entity_id));
-          setEntityCache(entities);
-          setHaEntities(entities);
-          conn.dispose();
-        },
-      },
-    );
-    conn.connect();
-    return () => conn.dispose();
-  }, [haEntities.length]);
 
   // Display state
   const displayMeshMapRef = useRef<DisplayMeshMap>({});
@@ -367,6 +352,36 @@ export default function ConfigEditor() {
   tubesRef.current = tubes;
   const tubePreviewInfoRef = useRef<TubePreviewInfo | null>(null);
 
+  // Room state
+  const roomZoneMeshMapRef = useRef<RoomZoneMeshMap>({});
+  const [rooms, setRooms] = useState<RoomConfig[]>([]);
+  const roomsRef = useRef(rooms);
+  roomsRef.current = rooms;
+  const [roomEditIdx, setRoomEditIdx] = useState<number | null>(null);
+  const [roomPanelOpen, setRoomPanelOpen] = useState(false);
+  const roomPanelOpenRef = useRef(roomPanelOpen);
+  roomPanelOpenRef.current = roomPanelOpen;
+  const [roomDraft, setRoomDraft] = useState<RoomConfig | null>(null);
+  const roomPreviewInfoRef = useRef<RoomPreviewInfo>({
+    size: { width: editorDefaultSizes.wall.width, height: 0.025, depth: editorDefaultSizes.wall.depth },
+    rotation: { x: 0, y: 0, z: 0 },
+  });
+  const handleCloseRoomPanelRef = useRef<() => void>(() => {});
+
+  const placedEntityIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const light of lights) {
+      ids.add(light.entityId);
+      if (light.modeEntityId) ids.add(light.modeEntityId);
+      if (light.doubleTapEntityId) ids.add(light.doubleTapEntityId);
+    }
+    for (const blind of blinds) ids.add(blind.entityId);
+    for (const display of displays) for (const source of display.sources) ids.add(source.entityId);
+    for (const device of smartDevices) ids.add(device.entityId);
+    for (const tube of tubes) for (const line of tube.lines) ids.add(line.sensorId);
+    return ids;
+  }, [blinds, displays, lights, smartDevices, tubes]);
+
   // Current preview shape/size from LightForm
   const previewInfoRef = useRef<PreviewInfo>({ shape: 'sphere', size: { diameter: editorDefaultSizes.light.diameter } });
 
@@ -392,6 +407,12 @@ export default function ConfigEditor() {
     if (!wallPanelOpenRef.current) {
       wallPreviewInfoRef.current = { size: editorDefaultSizes.wall };
     }
+    if (!roomPanelOpenRef.current) {
+      roomPreviewInfoRef.current = {
+        size: { width: editorDefaultSizes.wall.width, height: 0.025, depth: editorDefaultSizes.wall.depth },
+        rotation: { x: 0, y: 0, z: 0 },
+      };
+    }
   }, [editorDefaultSizes]);
 
   const showToast = useCallback((msg: string) => {
@@ -399,6 +420,37 @@ export default function ConfigEditor() {
     setToastVisible(true);
     setTimeout(() => setToastVisible(false), 2000);
   }, []);
+
+  const handleSyncHAAreas = useCallback(async (silent = false) => {
+    const { mode, haSettings } = getSetting('connection');
+    if (mode !== 'live' || !haSettings.url || !haSettings.token) {
+      setHaAreaSyncStatus('error');
+      if (!silent) showToast(t('rooms.connectionRequired'));
+      return;
+    }
+    setHaAreaSyncStatus('loading');
+    try {
+      const discovery = await discoverHAAreas({
+        url: haSettings.url,
+        port: haSettings.port,
+        token: haSettings.token,
+      });
+      setHaAreas(discovery.areas);
+      setHaRoomEntities(discovery.entities);
+      setHaEntities(discovery.entityOptions);
+      setEntityCache(discovery.entityOptions);
+      setHaAreaSyncStatus('ready');
+      if (!silent) showToast(t('rooms.synced', { areas: discovery.areas.length, entities: discovery.entities.length }));
+    } catch (error) {
+      console.warn('[Editor] Home Assistant area sync failed:', error);
+      setHaAreaSyncStatus('error');
+      if (!silent) showToast(t('rooms.syncFailed'));
+    }
+  }, [showToast, t]);
+
+  useEffect(() => {
+    void handleSyncHAAreas(true);
+  }, [handleSyncHAAreas]);
 
   const handleEditorTexturesChange = useCallback((enabled: boolean) => {
     setShowTextures(enabled);
@@ -1060,6 +1112,22 @@ export default function ConfigEditor() {
         const attached = gizmo.attachedMesh;
         if (!attached) return;
 
+        if (roomPanelOpenRef.current) {
+          if (activeMode === 'rotate') {
+            roomFormRef.current?.updateRotation(rotationFromMesh(attached));
+          } else if (activeMode === 'scale') {
+            const currentSize = roomPreviewInfoRef.current.size;
+            roomFormRef.current?.updateSize({
+              width: currentSize.width * Math.max(0.001, attached.scaling.x),
+              height: currentSize.height * Math.max(0.001, attached.scaling.y),
+              depth: currentSize.depth * Math.max(0.001, attached.scaling.z),
+            });
+          } else {
+            flushGizmoPosition();
+          }
+          return;
+        }
+
         if (wallPanelOpenRef.current) {
           if (activeMode === 'rotate') {
             wallFormRef.current?.updateRotation(rotationFromMesh(attached));
@@ -1245,6 +1313,8 @@ export default function ConfigEditor() {
         smartDevicesRef.current = config.smartDevices || [];
         setTubes(config.tubes || []);
         tubesRef.current = config.tubes || [];
+        setRooms(config.rooms || []);
+        roomsRef.current = config.rooms || [];
         modelScaleRef.current = getModelScale(config.model);
         modelObjectOverridesRef.current = config.model?.objectOverrides ?? [];
         importedModelObjectsRef.current = config.model?.importedObjects ?? [];
@@ -1374,8 +1444,8 @@ export default function ConfigEditor() {
           };
           setPosition(newPos);
           positionRef.current = newPos;
-        } else if (wallPanelOpenRef.current || smartDevicePanelOpenRef.current) {
-          // Light blockers and device presets use the exact picked position.
+        } else if (wallPanelOpenRef.current || smartDevicePanelOpenRef.current || roomPanelOpenRef.current) {
+          // Light blockers, device presets, and room centres use the exact picked position.
           const newPos: LightPosition = {
             x: p.x,
             y: p.y,
@@ -1444,7 +1514,7 @@ export default function ConfigEditor() {
         return;
       }
       // Skip click-to-edit while another placed object is being edited.
-      if (displayPanelOpenRef.current || blindPanelOpenRef.current || wallPanelOpenRef.current || smartDevicePanelOpenRef.current || tubePanelOpenRef.current) return;
+      if (displayPanelOpenRef.current || blindPanelOpenRef.current || wallPanelOpenRef.current || smartDevicePanelOpenRef.current || tubePanelOpenRef.current || roomPanelOpenRef.current) return;
 
       // Pick under pointer
       const pick = ctx.scene.pick(evt.offsetX, evt.offsetY);
@@ -1497,6 +1567,12 @@ export default function ConfigEditor() {
           handleEditTubeRef.current(idx);
         }
       }
+
+      if (pick.pickedMesh?.metadata?.roomId) {
+        const clickedId = pick.pickedMesh.metadata.roomId;
+        const idx = roomsRef.current.findIndex((room) => room.id === clickedId);
+        if (idx !== -1) handleEditRoomRef.current(idx);
+      }
     };
 
     init();
@@ -1516,6 +1592,7 @@ export default function ConfigEditor() {
         removeSmartDeviceMesh(smartDeviceMeshMapRef.current, id),
       );
       disposeAllTubes(tubeMeshMapRef.current);
+      disposeAllRoomZones(roomZoneMeshMapRef.current);
       clearPreview();
       detachModelObjectGizmo();
       disposeImportedObjects();
@@ -1597,6 +1674,24 @@ export default function ConfigEditor() {
     }
   }, [editorMode, shadowWalls, rebuildWallEditorMeshes, disposeWallEditorMeshes]);
 
+  useEffect(() => {
+    const scene = sceneCtxRef.current?.scene;
+    if (!scene || editorMode !== 'rooms') {
+      disposeAllRoomZones(roomZoneMeshMapRef.current);
+      return;
+    }
+    const visibleRooms = roomPanelOpen && roomEditIdx !== null
+      ? rooms.filter((_, index) => index !== roomEditIdx)
+      : rooms;
+    rebuildAllRoomZones(
+      scene,
+      roomZoneMeshMapRef.current,
+      visibleRooms,
+      entityScaleRootRef.current ?? undefined,
+      roomEditIdx !== null ? rooms[roomEditIdx]?.id : null,
+    );
+  }, [editorMode, roomEditIdx, roomPanelOpen, rooms]);
+
   // Keyboard shortcuts: Ctrl+Z undo, Escape close panel
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1606,7 +1701,7 @@ export default function ConfigEditor() {
 
       // Ctrl+Z undo (must check before the modifier guard)
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
-        if (!panelOpenRef.current && !displayPanelOpenRef.current && !blindPanelOpenRef.current && !wallPanelOpenRef.current && !smartDevicePanelOpenRef.current && !tubePanelOpenRef.current) return;
+        if (!panelOpenRef.current && !displayPanelOpenRef.current && !blindPanelOpenRef.current && !wallPanelOpenRef.current && !smartDevicePanelOpenRef.current && !tubePanelOpenRef.current && !roomPanelOpenRef.current) return;
         const stack = posUndoStackRef.current;
         if (stack.length === 0) return;
         e.preventDefault();
@@ -1657,6 +1752,11 @@ export default function ConfigEditor() {
         if (tubePanelOpenRef.current) {
           e.preventDefault();
           handleCloseTubePanelRef.current();
+          return;
+        }
+        if (roomPanelOpenRef.current) {
+          e.preventDefault();
+          handleCloseRoomPanelRef.current();
           return;
         }
       }
@@ -2636,6 +2736,106 @@ export default function ConfigEditor() {
     );
   }, [position, wallPanelOpen, updatePreviewMesh]);
 
+  // --- Room handlers ---
+
+  const handleAddRoom = useCallback((area?: HAAreaRegistryEntry) => {
+    const anchor = { x: 0, y: 0, z: 0 };
+    const draft: RoomConfig = {
+      id: generateUUID(),
+      name: area?.name ?? t('rooms.newName'),
+      haAreaIds: area ? [area.area_id] : [],
+      anchor,
+      zone: {
+        width: editorDefaultSizes.wall.width,
+        height: 0.025,
+        depth: editorDefaultSizes.wall.depth,
+        rotationY: 0,
+      },
+      primaryEntityIds: [],
+    };
+    setRoomEditIdx(null);
+    setRoomDraft(draft);
+    setPosition(anchor);
+    positionRef.current = anchor;
+    posUndoStackRef.current = [];
+    setRoomPanelOpen(true);
+  }, [editorDefaultSizes.wall.depth, editorDefaultSizes.wall.width, t]);
+
+  const handleEditRoom = useCallback((idx: number) => {
+    const room = rooms[idx];
+    if (!room) return;
+    setRoomEditIdx(idx);
+    setRoomDraft({
+      ...room,
+      haAreaIds: [...room.haAreaIds],
+      anchor: { ...room.anchor },
+      zone: { ...room.zone },
+      primaryEntityIds: [...room.primaryEntityIds],
+    });
+    setPosition(room.anchor);
+    positionRef.current = room.anchor;
+    posUndoStackRef.current = [];
+    setRoomPanelOpen(true);
+  }, [rooms]);
+  const handleEditRoomRef = useRef(handleEditRoom);
+  handleEditRoomRef.current = handleEditRoom;
+
+  const handleDeleteRoom = useCallback(async (idx: number) => {
+    const room = rooms[idx];
+    if (!room) return;
+    const updated = rooms.filter((_, index) => index !== idx);
+    setRooms(updated);
+    roomsRef.current = updated;
+    await updateConfig({ rooms: updated });
+    showToast(t('rooms.deleted'));
+  }, [rooms, showToast, t]);
+
+  const handleCloseRoomPanel = useCallback(() => {
+    setRoomPanelOpen(false);
+    setRoomEditIdx(null);
+    setRoomDraft(null);
+    clearPreview();
+    exitPlacingMode();
+  }, [clearPreview, exitPlacingMode]);
+  handleCloseRoomPanelRef.current = handleCloseRoomPanel;
+
+  const handleRoomPreviewChange = useCallback((info: RoomPreviewInfo) => {
+    roomPreviewInfoRef.current = info;
+    if (!roomPanelOpen) return;
+    updatePreviewMesh(
+      position,
+      'cube',
+      { width: info.size.width, height: info.size.height, depth: info.size.depth },
+      info.rotation,
+    );
+  }, [position, roomPanelOpen, updatePreviewMesh]);
+
+  const handleSaveRoom = useCallback(async (room: RoomConfig) => {
+    const updated = roomEditIdx === null
+      ? [...rooms, room]
+      : rooms.map((current, index) => index === roomEditIdx ? room : current);
+    setRooms(updated);
+    roomsRef.current = updated;
+    await updateConfig({ rooms: updated });
+    handleCloseRoomPanel();
+    showToast(t('rooms.saved'));
+  }, [handleCloseRoomPanel, roomEditIdx, rooms, showToast, t]);
+
+  useEffect(() => {
+    if (!roomPanelOpen) return;
+    if (draggingGizmoRef.current && previewMeshRef.current) {
+      previewMeshRef.current.position.set(position.x, position.y, position.z);
+      return;
+    }
+    const info = roomPreviewInfoRef.current;
+    updatePreviewMesh(
+      position,
+      'cube',
+      { width: info.size.width, height: info.size.height, depth: info.size.depth },
+      info.rotation,
+    );
+  }, [position, roomPanelOpen, updatePreviewMesh]);
+
   // ── Tube handlers ──────────────────────────────────────────────
 
   const handleAddTube = useCallback(() => {
@@ -2924,18 +3124,26 @@ export default function ConfigEditor() {
       handleWallPreviewChange(wallPreviewInfoRef.current);
     } else if (smartDevicePanelOpenRef.current) {
       handleSmartDevicePreviewChange(smartDevicePreviewInfoRef.current);
+    } else if (roomPanelOpenRef.current) {
+      const info = roomPreviewInfoRef.current;
+      updatePreviewMesh(
+        positionRef.current,
+        'cube',
+        { width: info.size.width, height: info.size.height, depth: info.size.depth },
+        info.rotation,
+      );
     }
   }, [transformMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Save config to server
   const handleSaveConfig = useCallback(async () => {
     try {
-      await updateConfig({ lights, lightGroups, blinds, displays, shadowWalls, smartDevices, tubes });
-      showToast(t('editor.savedSummary', { lights: lights.length, blinds: blinds.length, displays: displays.length, walls: shadowWalls.length, devices: smartDevices.length, tubes: tubes.length }));
+      await updateConfig({ lights, lightGroups, blinds, displays, shadowWalls, smartDevices, tubes, rooms });
+      showToast(t('editor.savedSummary', { lights: lights.length, blinds: blinds.length, displays: displays.length, walls: shadowWalls.length, devices: smartDevices.length, tubes: tubes.length, rooms: rooms.length }));
     } catch (e) {
       alert(t('editor.saveConfigFailed', { message: e instanceof Error ? e.message : String(e) }));
     }
-  }, [lights, lightGroups, blinds, displays, shadowWalls, smartDevices, tubes, showToast]);
+  }, [lights, lightGroups, blinds, displays, shadowWalls, smartDevices, tubes, rooms, showToast, t]);
 
   // Load config from server
   const handleLoadConfig = useCallback(async () => {
@@ -2951,6 +3159,8 @@ export default function ConfigEditor() {
       smartDevicesRef.current = config.smartDevices || [];
       setTubes(config.tubes || []);
       tubesRef.current = config.tubes || [];
+      setRooms(config.rooms || []);
+      roomsRef.current = config.rooms || [];
       modelObjectOverridesRef.current = config.model?.objectOverrides ?? [];
       importedModelObjectsRef.current = config.model?.importedObjects ?? [];
       const overridesById = new Map(modelObjectOverridesRef.current.map((override) => [override.id, override]));
@@ -2964,6 +3174,7 @@ export default function ConfigEditor() {
           if (original) applyModelObjectTransform(mesh, original);
         }
       }
+
       const scene = sceneCtxRef.current?.scene;
       if (scene) {
         rebuildAllMeshes(scene, meshMapRef.current, config.lights || [], {
@@ -2986,7 +3197,7 @@ export default function ConfigEditor() {
       } else {
         syncModelObjectList(importedModelObjectsRef.current);
       }
-      showToast(t('editor.loadedSummary', { lights: config.lights?.length || 0, blinds: config.blinds?.length || 0, displays: config.displays?.length || 0, walls: config.shadowWalls?.length || 0, devices: config.smartDevices?.length || 0, tubes: config.tubes?.length || 0 }));
+      showToast(t('editor.loadedSummary', { lights: config.lights?.length || 0, blinds: config.blinds?.length || 0, displays: config.displays?.length || 0, walls: config.shadowWalls?.length || 0, devices: config.smartDevices?.length || 0, tubes: config.tubes?.length || 0, rooms: config.rooms?.length || 0 }));
     } catch (e) {
       alert(t('editor.loadConfigFailed', { message: e instanceof Error ? e.message : String(e) }));
     }
@@ -3067,6 +3278,16 @@ export default function ConfigEditor() {
             <span className="editor-tab-count">{tubes.length}</span>
           </button>
           <button
+            className={`editor-tab${editorMode === 'rooms' ? ' active' : ''}`}
+            data-tab="rooms"
+            onClick={() => setEditorMode('rooms')}
+            title={t('editor.rooms')}
+            aria-label={`${t('editor.rooms')}: ${rooms.length}`}
+          >
+            <House aria-hidden="true" />
+            <span className="editor-tab-count">{rooms.length}</span>
+          </button>
+          <button
             className={`editor-tab${editorMode === 'modelObjects' ? ' active' : ''}`}
             data-tab="modelObjects"
             onClick={() => setEditorMode('modelObjects')}
@@ -3133,6 +3354,17 @@ export default function ConfigEditor() {
               onDelete={handleDeleteTube}
               onDuplicate={handleDuplicateTube}
             />
+          ) : editorMode === 'rooms' ? (
+            <RoomList
+              rooms={rooms}
+              areas={haAreas}
+              selectedIdx={roomEditIdx}
+              syncStatus={haAreaSyncStatus}
+              onSelect={handleEditRoom}
+              onDelete={handleDeleteRoom}
+              onAddArea={handleAddRoom}
+              onSync={() => { void handleSyncHAAreas(false); }}
+            />
           ) : (
             <ModelObjectList
               objects={modelObjects}
@@ -3172,6 +3404,10 @@ export default function ConfigEditor() {
             <button className="btn btn-primary editor-add-btn" onClick={handleAddTube}>
               {t('editor.addTube')}
             </button>
+          ) : editorMode === 'rooms' ? (
+            <button className="btn btn-primary editor-add-btn" onClick={() => handleAddRoom()}>
+              {t('editor.addRoom')}
+            </button>
           ) : (
             <button
               className="btn btn-primary editor-add-btn"
@@ -3193,10 +3429,10 @@ export default function ConfigEditor() {
       </div>
 
       {/* 3D Canvas */}
-      <div className="canvas-area editor-canvas">
+      <div className={`canvas-area editor-canvas${panelOpen || displayPanelOpen || blindPanelOpen || wallPanelOpen || smartDevicePanelOpen || tubePanelOpen || roomPanelOpen ? ' form-open' : ''}`}>
         <canvas ref={canvasRef} />
         <div className={`mode-banner${placingMode ? ' visible' : ''}`}>
-          {displayPanelOpen ? t('editor.placeDisplayBanner') : blindPanelOpen ? t('editor.placeBlindBanner') : wallPanelOpen ? t('editor.placeWallBanner') : smartDevicePanelOpen ? t('editor.placeSmartDeviceBanner') : t('editor.placeLightBanner')}
+          {displayPanelOpen ? t('editor.placeDisplayBanner') : blindPanelOpen ? t('editor.placeBlindBanner') : wallPanelOpen ? t('editor.placeWallBanner') : smartDevicePanelOpen ? t('editor.placeSmartDeviceBanner') : roomPanelOpen ? t('editor.placeRoomBanner') : t('editor.placeLightBanner')}
         </div>
         <div className="editor-view-toolbar editor-transform-toolbar" role="toolbar" aria-label={t('editor.transformTools')}>
           {TRANSFORM_MODES.map((mode) => {
@@ -3330,6 +3566,25 @@ export default function ConfigEditor() {
           onPreviewChange={handleTubePreviewChange}
           haEntities={haEntities}
           defaultSettings={editorDefaultSizes.tube}
+        />
+
+        <RoomForm
+          ref={roomFormRef}
+          open={roomPanelOpen}
+          room={roomDraft}
+          isNew={roomEditIdx === null}
+          position={position}
+          areas={haAreas}
+          entities={haRoomEntities}
+          placedEntityIds={placedEntityIds}
+          defaultZone={{ width: editorDefaultSizes.wall.width, height: 0.025, depth: editorDefaultSizes.wall.depth }}
+          placingMode={placingMode}
+          onPositionChange={handlePositionChange}
+          onPreviewChange={handleRoomPreviewChange}
+          onEnterPlacingMode={enterPlacingMode}
+          onExitPlacingMode={exitPlacingMode}
+          onSave={handleSaveRoom}
+          onClose={handleCloseRoomPanel}
         />
       </div>
 

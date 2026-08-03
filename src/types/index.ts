@@ -167,6 +167,37 @@ export interface SmartDeviceConfig {
   scale?: LightPosition;
 }
 
+// --- Rooms / Home Assistant areas ---
+
+export interface RoomZone {
+  width: number;
+  depth: number;
+  /** Thin editor-only floor marker height. */
+  height?: number;
+  /** Rotation around the vertical axis in degrees. */
+  rotationY?: number;
+}
+
+export interface RoomDashboardView {
+  dashboardPath: string;
+  viewPath: string;
+}
+
+export interface RoomConfig {
+  id: string;
+  name: string;
+  icon?: string;
+  /** One visual room may combine multiple Home Assistant areas. */
+  haAreaIds: string[];
+  /** Logical centre of the room in model coordinates. */
+  anchor: LightPosition;
+  zone: RoomZone;
+  /** Entities promoted to the compact room controls, in display order. */
+  primaryEntityIds: string[];
+  hiddenEntityIds?: string[];
+  dashboardView?: RoomDashboardView;
+}
+
 // --- Wall Displays ---
 
 export type DisplayAnimation = 'spin' | 'pulse' | 'glow' | 'bounce' | 'flash';
@@ -253,6 +284,7 @@ export interface AppConfig {
   displays?: DisplayConfig[];
   shadowWalls?: ShadowWallConfig[];
   smartDevices?: SmartDeviceConfig[];
+  rooms?: RoomConfig[];
   sidePanel?: SidePanelConfig;
   tubes?: TubeConfig[];
   onboarding?: OnboardingState;
@@ -277,6 +309,7 @@ export interface FullConfig {
   displays?: DisplayConfig[];
   shadowWalls?: ShadowWallConfig[];
   smartDevices?: SmartDeviceConfig[];
+  rooms?: RoomConfig[];
   sidePanel?: SidePanelConfig;
   tubes?: TubeConfig[];
   onboarding?: OnboardingState;

@@ -12,6 +12,7 @@ A 3D floorplan dashboard for [Home Assistant](https://www.home-assistant.io/). L
 - **Sun and weather** -- sun position tracks your real location; optional rain/snow particle effects
 - **Side panel** -- configurable cards for scripts, indicators, and graphs
 - **Config editor** -- define lights, blinds, displays, light blockers, smart-home devices, energy flows, imported objects, and model-object overrides from a built-in UI
+- **Room mapping** -- import Home Assistant areas, place room zones in 3D, and curate automatically prioritised room entities
 - **Onboarding wizard** -- guided setup for first-time users
 - **Backup / restore** -- export and import your full configuration as a ZIP
 - **Demo mode** -- explore the dashboard without a Home Assistant instance
@@ -29,6 +30,7 @@ A complete, categorized overview is available in
 - Model-object editor: select imported subobjects or uploaded objects and fine-tune position, rotation, and scale with shared gizmo modes.
 - Smart-home object expansion: blinds/covers, TV-style media-player displays, ellipsoid lights, and rotation/scale editing for placed items.
 - Editor polish: lower camera sensitivity, smoother zoom, German/English UI text, and more complete backup/restore coverage.
+- Home Assistant room mapping: synchronise areas and assigned entities, add room zones in 3D, and prioritise safety and primary controls automatically.
 
 ## Tech stack
 
@@ -81,7 +83,7 @@ All configuration happens in the browser -- no config files to edit manually.
 | Location (for sun tracking) | Onboarding wizard or Settings |
 | Theme, rendering, camera | Settings modal |
 | 3D model, scale, textures, and object overrides | Settings and Config editor |
-| Lights, blinds, displays, light blockers, smart-home devices, energy flows, imported objects | Config editor |
+| Lights, blinds, displays, rooms, light blockers, smart-home devices, energy flows, imported objects | Config editor |
 
 Configuration is persisted in `localStorage`. The 3D model is stored in `IndexedDB`.
 

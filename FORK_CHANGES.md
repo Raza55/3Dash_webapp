@@ -68,6 +68,25 @@ entsprechenden Editor-Funktionen gesetzt.
   gedimmte Lampen fälschlich wie ausgeschaltet wirken.
 - IR-/Remote-Lichter können Modi und Farben über zusätzliche Entities abbilden.
 
+## Räume und Home-Assistant-Bereiche
+
+- Der Editor besitzt eine eigene Kategorie `Räume`, die Home-Assistant-Bereiche über
+  die Area-, Device- und Entity-Registries der WebSocket-API nur lesend synchronisiert.
+- Nicht konfigurierte HA-Bereiche können direkt aus der Raumliste übernommen werden;
+  ein visueller Raum darf bei Bedarf mehrere HA-Bereiche zusammenfassen.
+- Jeder Raum erhält einen im 3D-Modell platzierbaren Mittelpunkt sowie eine anpassbare,
+  drehbare Bodenfläche. Die globalen Werkzeuge Verschieben, Drehen und Skalieren gelten
+  auch für diese Raumfläche.
+- Zugeordnete Entities werden nach Sicherheit, Hauptsteuerung, Klima, Medien und
+  Raumstatus priorisiert. Diagnostik-, Konfigurations- und deaktivierte Entities werden
+  standardmäßig ausgeblendet.
+- Bereits als Licht, Rollo, Screen, Smart-Home-Gerät oder Energiefluss platzierte
+  Entities werden automatisch erkannt und in der Empfehlung höher eingestuft.
+- Die wichtigsten Entities können pro Raum einzeln ausgewählt und in fester Reihenfolge
+  in der App-Konfiguration gespeichert werden.
+- Auf schmalen Editorfenstern weicht die Objektliste während der Bearbeitung, sodass
+  3D-Fläche, Transformationswerkzeuge und Formular gleichzeitig bedienbar bleiben.
+
 ## Rollos und Cover-Entities
 
 - Die Kategorie Rollos verbindet rechteckige 3D-Rollos mit Home-Assistant-Entities
@@ -128,7 +147,7 @@ entsprechenden Editor-Funktionen gesetzt.
 
 - Die Konfiguration enthält zusätzliche optionale Blöcke für Modellskalierung,
   Unterobjekt-Overrides, importierte Objekte, Rollos, Smart-Home-Geräte,
-  Leuchtenmodelle, Touch-Zonen und Energieflusstypen.
+  Leuchtenmodelle, Touch-Zonen, Räume und Energieflusstypen.
 - Konfiguration und Einstellungen werden weiterhin im Browser gespeichert. Große
   Modelldateien liegen in IndexedDB.
 - Backup und Wiederherstellung umfassen Modell, Einstellungen, platzierte Objekte und

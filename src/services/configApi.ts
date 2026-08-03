@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import type { AppConfig, BlindConfig, DisplayConfig, LightConfig, LightGroup, ModelConfig, ShadowWallConfig, SidePanelConfig, SmartDeviceConfig, TubeConfig } from '../types';
+import type { AppConfig, BlindConfig, DisplayConfig, LightConfig, LightGroup, ModelConfig, RoomConfig, ShadowWallConfig, SidePanelConfig, SmartDeviceConfig, TubeConfig } from '../types';
 import {
   saveModel as dbSaveModel,
   getModel as dbGetModel,
@@ -29,6 +29,7 @@ function normalizeConfig(config: Partial<AppConfig>): AppConfig {
     location: systemLocationWithNorthOffset(config.location?.northOffset),
     lights: config.lights ?? [],
     smartDevices: config.smartDevices ?? [],
+    rooms: config.rooms ?? [],
     model: {
       scale: config.model?.scale ?? 1,
       objectOverrides: config.model?.objectOverrides ?? [],
@@ -74,6 +75,7 @@ export function updateConfig(data: {
   displays?: DisplayConfig[];
   shadowWalls?: ShadowWallConfig[];
   smartDevices?: SmartDeviceConfig[];
+  rooms?: RoomConfig[];
   location?: { latitude: number; longitude: number; northOffset?: number };
   sidePanel?: SidePanelConfig;
   tubes?: TubeConfig[];
