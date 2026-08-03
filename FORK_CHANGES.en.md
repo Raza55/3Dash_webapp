@@ -75,7 +75,13 @@ are used.
 - Unconfigured HA areas can be added directly from the room list, and one visual room
   can combine multiple HA areas when needed.
 - Each room has a centre that can be placed in the 3D model and an adjustable,
-  rotatable floor area. The global Move, Rotate, and Scale tools also apply to rooms.
+  rotatable floor area. A dedicated stable centre handle follows both model clicks and
+  position sliders without a delayed preview.
+- Room areas can be stored as rectangles or free-form polygons, including concave
+  outlines. Corner points can be selected, moved, added, and removed directly in the
+  3D view, and a reset action restores a rectangle.
+- The global Move, Rotate, and Scale tools apply to the complete room area. Moving an
+  individual polygon point keeps it locked to the room's floor plane.
 - Assigned entities are ranked by Safety, Primary Controls, Climate, Media, and Room
   Status. Diagnostic, configuration, disabled, and hidden entities are omitted by
   default.

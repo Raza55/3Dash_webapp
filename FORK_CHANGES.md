@@ -75,8 +75,14 @@ entsprechenden Editor-Funktionen gesetzt.
 - Nicht konfigurierte HA-Bereiche können direkt aus der Raumliste übernommen werden;
   ein visueller Raum darf bei Bedarf mehrere HA-Bereiche zusammenfassen.
 - Jeder Raum erhält einen im 3D-Modell platzierbaren Mittelpunkt sowie eine anpassbare,
-  drehbare Bodenfläche. Die globalen Werkzeuge Verschieben, Drehen und Skalieren gelten
-  auch für diese Raumfläche.
+  drehbare Bodenfläche. Der Mittelpunkt besitzt einen eigenen stabilen Griff und folgt
+  sowohl Modellklicks als auch den Positionsreglern ohne verzögerte Vorschau.
+- Raumflächen können als Rechteck oder als frei geformtes, auch konkaves Polygon
+  gespeichert werden. Eckpunkte lassen sich direkt in der 3D-Ansicht auswählen,
+  verschieben, hinzufügen und entfernen; ein Reset stellt wieder ein Rechteck her.
+- Die globalen Werkzeuge Verschieben, Drehen und Skalieren gelten auch für die gesamte
+  Raumfläche. Beim Verschieben eines einzelnen Polygonpunkts bleibt die vertikale
+  Raumebene gesperrt.
 - Zugeordnete Entities werden nach Sicherheit, Hauptsteuerung, Klima, Medien und
   Raumstatus priorisiert. Diagnostik-, Konfigurations- und deaktivierte Entities werden
   standardmäßig ausgeblendet.

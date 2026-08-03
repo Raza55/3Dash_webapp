@@ -1,18 +1,21 @@
 import {
   Color3,
-  Color4,
   DynamicTexture,
+  LinesMesh,
   Mesh,
   MeshBuilder,
   StandardMaterial,
   Tools,
+  VertexData,
+  Vector3,
   type Scene,
   type TransformNode,
 } from '@babylonjs/core';
-import type { RoomConfig } from '../types';
+import type { RoomConfig, RoomZone, RoomZonePoint } from '../types';
 
 export interface RoomZoneMeshEntry {
   zone: Mesh;
+  outline: LinesMesh;
   label: Mesh;
   zoneMaterial: StandardMaterial;
   labelMaterial: StandardMaterial;
@@ -25,11 +28,145 @@ export function removeRoomZoneMesh(map: RoomZoneMeshMap, roomId: string): void {
   const entry = map[roomId];
   if (!entry) return;
   entry.zone.dispose();
+  entry.outline.dispose();
   entry.label.dispose();
   entry.zoneMaterial.dispose();
   entry.labelMaterial.dispose();
   entry.labelTexture.dispose();
   delete map[roomId];
+}
+
+export function rectangleRoomZonePoints(width: number, depth: number): RoomZonePoint[] {
+  const halfWidth = Math.max(0.1, width) / 2;
+  const halfDepth = Math.max(0.1, depth) / 2;
+  return [
+    { x: -halfWidth, z: -halfDepth },
+    { x: halfWidth, z: -halfDepth },
+    { x: halfWidth, z: halfDepth },
+    { x: -halfWidth, z: halfDepth },
+  ];
+}
+
+export function getRoomZonePoints(zone: RoomZone): RoomZonePoint[] {
+  if (zone.points && zone.points.length >= 3) {
+    return zone.points.map((point) => ({ x: point.x, z: point.z }));
+  }
+  return rectangleRoomZonePoints(zone.width, zone.depth);
+}
+
+function signedArea(points: RoomZonePoint[]): number {
+  let area = 0;
+  for (let index = 0; index < points.length; index++) {
+    const current = points[index];
+    const next = points[(index + 1) % points.length];
+    area += current.x * next.z - next.x * current.z;
+  }
+  return area / 2;
+}
+
+function pointInTriangle(point: RoomZonePoint, a: RoomZonePoint, b: RoomZonePoint, c: RoomZonePoint): boolean {
+  const cross = (p1: RoomZonePoint, p2: RoomZonePoint, p3: RoomZonePoint) =>
+    (p2.x - p1.x) * (p3.z - p1.z) - (p2.z - p1.z) * (p3.x - p1.x);
+  const ab = cross(a, b, point);
+  const bc = cross(b, c, point);
+  const ca = cross(c, a, point);
+  return (ab >= -1e-7 && bc >= -1e-7 && ca >= -1e-7)
+    || (ab <= 1e-7 && bc <= 1e-7 && ca <= 1e-7);
+}
+
+/** Ear-clipping triangulation for simple concave room polygons. */
+function triangulateRoomZone(points: RoomZonePoint[]): number[] {
+  if (points.length < 3) return [];
+  const order = points.map((_, index) => index);
+  if (signedArea(points) < 0) order.reverse();
+  const triangles: number[] = [];
+  let attempts = 0;
+
+  while (order.length > 3 && attempts < points.length * points.length) {
+    let clipped = false;
+    for (let index = 0; index < order.length; index++) {
+      const previous = order[(index - 1 + order.length) % order.length];
+      const current = order[index];
+      const next = order[(index + 1) % order.length];
+      const a = points[previous];
+      const b = points[current];
+      const c = points[next];
+      const convex = (b.x - a.x) * (c.z - b.z) - (b.z - a.z) * (c.x - b.x);
+      if (convex <= 1e-7) continue;
+      if (order.some((candidate) => candidate !== previous && candidate !== current && candidate !== next
+        && pointInTriangle(points[candidate], a, b, c))) continue;
+      triangles.push(previous, current, next);
+      order.splice(index, 1);
+      clipped = true;
+      break;
+    }
+    if (!clipped) break;
+    attempts++;
+  }
+
+  if (order.length === 3) triangles.push(order[0], order[1], order[2]);
+  if (triangles.length === (points.length - 2) * 3) return triangles;
+
+  // A malformed/self-intersecting polygon still gets a visible fallback surface.
+  return points.slice(1, -1).flatMap((_, index) => [0, index + 1, index + 2]);
+}
+
+function roomZoneVertexData(points: RoomZonePoint[], height: number): VertexData {
+  const safeHeight = Math.max(0.01, height);
+  const topOffset = points.length;
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  for (const y of [0, safeHeight]) {
+    for (const point of points) {
+      positions.push(point.x, y, point.z);
+      uvs.push(point.x, point.z);
+    }
+  }
+
+  const topTriangles = triangulateRoomZone(points);
+  const indices: number[] = [];
+  for (let index = 0; index < topTriangles.length; index += 3) {
+    const a = topTriangles[index];
+    const b = topTriangles[index + 1];
+    const c = topTriangles[index + 2];
+    indices.push(topOffset + a, topOffset + c, topOffset + b);
+    indices.push(a, b, c);
+  }
+  for (let index = 0; index < points.length; index++) {
+    const next = (index + 1) % points.length;
+    indices.push(index, next, topOffset + next, index, topOffset + next, topOffset + index);
+  }
+
+  const normals: number[] = [];
+  VertexData.ComputeNormals(positions, indices, normals);
+  const data = new VertexData();
+  data.positions = positions;
+  data.indices = indices;
+  data.normals = normals;
+  data.uvs = uvs;
+  return data;
+}
+
+export function createRoomZoneSurface(
+  scene: Scene,
+  name: string,
+  points: RoomZonePoint[],
+  height: number,
+  updatable = false,
+): Mesh {
+  const mesh = new Mesh(name, scene);
+  roomZoneVertexData(points, height).applyToMesh(mesh, updatable);
+  return mesh;
+}
+
+export function updateRoomZoneSurface(mesh: Mesh, points: RoomZonePoint[], height: number): void {
+  roomZoneVertexData(points, height).applyToMesh(mesh, true);
+  mesh.refreshBoundingInfo();
+}
+
+export function roomZoneOutlinePoints(points: RoomZonePoint[], height: number): Vector3[] {
+  const y = Math.max(0.01, height) + 0.003;
+  return [...points, points[0]].map((point) => new Vector3(point.x, y, point.z));
 }
 
 export function disposeAllRoomZones(map: RoomZoneMeshMap): void {
@@ -43,12 +180,9 @@ export function createRoomZoneMesh(
   selected = false,
 ): RoomZoneMeshEntry {
   const height = Math.max(0.01, room.zone.height ?? 0.025);
-  const zone = MeshBuilder.CreateBox(`room-zone-${room.id}`, {
-    width: Math.max(0.1, room.zone.width),
-    height,
-    depth: Math.max(0.1, room.zone.depth),
-  }, scene);
-  zone.position.set(room.anchor.x, room.anchor.y + height / 2, room.anchor.z);
+  const points = getRoomZonePoints(room.zone);
+  const zone = createRoomZoneSurface(scene, `room-zone-${room.id}`, points, height);
+  zone.position.set(room.anchor.x, room.anchor.y, room.anchor.z);
   zone.rotation.y = Tools.ToRadians(room.zone.rotationY ?? 0);
   zone.metadata = { roomId: room.id };
   zone.isPickable = true;
@@ -59,10 +193,18 @@ export function createRoomZoneMesh(
   zoneMaterial.emissiveColor = new Color3(0.04, 0.27, 0.42);
   zoneMaterial.alpha = selected ? 0.32 : 0.14;
   zoneMaterial.disableLighting = true;
+  zoneMaterial.backFaceCulling = false;
   zone.material = zoneMaterial;
-  zone.enableEdgesRendering();
-  zone.edgesWidth = selected ? 4 : 2;
-  zone.edgesColor = selected ? new Color4(0.2, 0.78, 1, 1) : new Color4(0.2, 0.65, 0.9, 0.7);
+  const outline = MeshBuilder.CreateLines(`room-zone-outline-${room.id}`, {
+    points: roomZoneOutlinePoints(points, height),
+  }, scene);
+  outline.color = selected ? new Color3(0.2, 0.78, 1) : new Color3(0.2, 0.65, 0.9);
+  outline.alpha = selected ? 1 : 0.7;
+  outline.position.copyFrom(zone.position);
+  outline.rotation.copyFrom(zone.rotation);
+  outline.metadata = { roomId: room.id };
+  outline.isPickable = false;
+  if (parent) outline.parent = parent;
 
   const labelTexture = new DynamicTexture(`room-label-texture-${room.id}`, { width: 512, height: 128 }, scene, true);
   labelTexture.hasAlpha = true;
@@ -84,7 +226,7 @@ export function createRoomZoneMesh(
   labelMaterial.backFaceCulling = false;
   label.material = labelMaterial;
 
-  return { zone, label, zoneMaterial, labelMaterial, labelTexture };
+  return { zone, outline, label, zoneMaterial, labelMaterial, labelTexture };
 }
 
 export function rebuildAllRoomZones(

@@ -172,10 +172,17 @@ export interface SmartDeviceConfig {
 export interface RoomZone {
   width: number;
   depth: number;
+  /** Optional polygon vertices relative to the room anchor on the floor plane. */
+  points?: RoomZonePoint[];
   /** Thin editor-only floor marker height. */
   height?: number;
   /** Rotation around the vertical axis in degrees. */
   rotationY?: number;
+}
+
+export interface RoomZonePoint {
+  x: number;
+  z: number;
 }
 
 export interface RoomDashboardView {

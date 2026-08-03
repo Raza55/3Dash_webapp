@@ -1,19 +1,26 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from 'react';
-import type { LightPosition, RoomConfig } from '../types';
+import type { LightPosition, RoomConfig, RoomZonePoint } from '../types';
 import type { HAAreaRegistryEntry, HARoomEntity } from '../services/haAreaRegistry';
 import { rankRoomEntities, type RoomEntityGroup } from '../utils/roomEntityPriority';
 import { AccordionSection, FormPanel } from './FormPanel';
 import { SliderNumberRow, VectorSliderFields } from './EditorSliderControls';
 import { useTranslation } from '../contexts/LanguageContext';
+import { rectangleRoomZonePoints } from '../babylon/RoomZoneMeshFactory';
 
 export interface RoomPreviewInfo {
   size: { width: number; height: number; depth: number };
   rotation: LightPosition;
+  points: RoomZonePoint[];
 }
 
 export interface RoomFormHandle {
   updateSize: (size: { width: number; height: number; depth: number }) => void;
   updateRotation: (rotation: LightPosition) => void;
+  updateScale: (scale: LightPosition) => void;
+  updatePoint: (index: number, point: RoomZonePoint) => void;
+  addPoint: () => number;
+  removePoint: (index: number) => void;
+  resetPoints: () => void;
 }
 
 interface Props {
@@ -36,6 +43,22 @@ interface Props {
 
 const GROUPS: RoomEntityGroup[] = ['safety', 'controls', 'climate', 'media', 'status', 'other'];
 
+function roundPoint(point: RoomZonePoint): RoomZonePoint {
+  return {
+    x: parseFloat(point.x.toFixed(3)),
+    z: parseFloat(point.z.toFixed(3)),
+  };
+}
+
+function pointBounds(points: RoomZonePoint[]): { width: number; depth: number } {
+  const xs = points.map((point) => point.x);
+  const zs = points.map((point) => point.z);
+  return {
+    width: Math.max(0.1, Math.max(...xs) - Math.min(...xs)),
+    depth: Math.max(0.1, Math.max(...zs) - Math.min(...zs)),
+  };
+}
+
 const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
   open, room, isNew, position, areas, entities, placedEntityIds, defaultZone, placingMode,
   onPositionChange, onPreviewChange, onEnterPlacingMode, onExitPlacingMode, onSave, onClose,
@@ -47,6 +70,7 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
   const [height, setHeight] = useState(defaultZone.height);
   const [depth, setDepth] = useState(defaultZone.depth);
   const [rotationY, setRotationY] = useState(0);
+  const [points, setPoints] = useState<RoomZonePoint[] | null>(null);
   const [primaryEntityIds, setPrimaryEntityIds] = useState<string[]>([]);
   const [showAll, setShowAll] = useState(false);
   const [selectionTouched, setSelectionTouched] = useState(false);
@@ -56,6 +80,25 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
     [areaIds, entities, placedEntityIds],
   );
 
+  const effectivePoints = useMemo(
+    () => points ?? rectangleRoomZonePoints(width, depth),
+    [depth, points, width],
+  );
+
+  const applyPointDimensions = (nextPoints: RoomZonePoint[]) => {
+    const bounds = pointBounds(nextPoints);
+    setWidth(parseFloat(bounds.width.toFixed(3)));
+    setDepth(parseFloat(bounds.depth.toFixed(3)));
+  };
+
+  const updatePoint = (index: number, point: RoomZonePoint) => {
+    const base = points ?? rectangleRoomZonePoints(width, depth);
+    if (!base[index]) return;
+    const next = base.map((current, currentIndex) => currentIndex === index ? roundPoint(point) : current);
+    setPoints(next);
+    applyPointDimensions(next);
+  };
+
   useImperativeHandle(ref, () => ({
     updateSize: (size) => {
       setWidth(parseFloat(Math.max(0.1, size.width).toFixed(3)));
@@ -63,6 +106,54 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
       setDepth(parseFloat(Math.max(0.1, size.depth).toFixed(3)));
     },
     updateRotation: (rotation) => setRotationY(parseFloat(rotation.y.toFixed(1))),
+    updateScale: (scale) => {
+      const scaleX = Math.max(0.001, scale.x);
+      const scaleY = Math.max(0.001, scale.y);
+      const scaleZ = Math.max(0.001, scale.z);
+      if (points) {
+        const next = points.map((point) => roundPoint({ x: point.x * scaleX, z: point.z * scaleZ }));
+        setPoints(next);
+        applyPointDimensions(next);
+      } else {
+        setWidth((current) => parseFloat(Math.max(0.1, current * scaleX).toFixed(3)));
+        setDepth((current) => parseFloat(Math.max(0.1, current * scaleZ).toFixed(3)));
+      }
+      setHeight((current) => parseFloat(Math.max(0.01, current * scaleY).toFixed(3)));
+    },
+    updatePoint,
+    addPoint: () => {
+      const base = points ?? rectangleRoomZonePoints(width, depth);
+      let edgeIndex = 0;
+      let longestEdge = -1;
+      for (let index = 0; index < base.length; index++) {
+        const next = base[(index + 1) % base.length];
+        const dx = next.x - base[index].x;
+        const dz = next.z - base[index].z;
+        const length = dx * dx + dz * dz;
+        if (length > longestEdge) {
+          longestEdge = length;
+          edgeIndex = index;
+        }
+      }
+      const nextIndex = (edgeIndex + 1) % base.length;
+      const inserted = roundPoint({
+        x: (base[edgeIndex].x + base[nextIndex].x) / 2,
+        z: (base[edgeIndex].z + base[nextIndex].z) / 2,
+      });
+      const insertAt = edgeIndex + 1;
+      const next = [...base.slice(0, insertAt), inserted, ...base.slice(insertAt)];
+      setPoints(next);
+      applyPointDimensions(next);
+      return insertAt;
+    },
+    removePoint: (index) => {
+      const base = points ?? rectangleRoomZonePoints(width, depth);
+      if (base.length <= 3 || !base[index]) return;
+      const next = base.filter((_, currentIndex) => currentIndex !== index);
+      setPoints(next);
+      applyPointDimensions(next);
+    },
+    resetPoints: () => setPoints(null),
   }));
 
   useEffect(() => {
@@ -73,6 +164,7 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
     setHeight(room?.zone.height ?? defaultZone.height);
     setDepth(room?.zone.depth ?? defaultZone.depth);
     setRotationY(room?.zone.rotationY ?? 0);
+    setPoints(room?.zone.points?.length ? room.zone.points.map(roundPoint) : null);
     setPrimaryEntityIds(room?.primaryEntityIds ?? []);
     setShowAll(false);
     setSelectionTouched(!isNew);
@@ -85,8 +177,30 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
 
   useEffect(() => {
     if (!open) return;
-    onPreviewChange({ size: { width, height, depth }, rotation: { x: 0, y: rotationY, z: 0 } });
-  }, [depth, height, onPreviewChange, open, rotationY, width]);
+    onPreviewChange({
+      size: { width, height, depth },
+      rotation: { x: 0, y: rotationY, z: 0 },
+      points: effectivePoints,
+    });
+  }, [depth, effectivePoints, height, onPreviewChange, open, rotationY, width]);
+
+  const handleWidthChange = (nextWidth: number) => {
+    const safeWidth = Math.max(0.1, nextWidth);
+    if (points) {
+      const ratio = safeWidth / Math.max(0.1, width);
+      setPoints(points.map((point) => roundPoint({ x: point.x * ratio, z: point.z })));
+    }
+    setWidth(safeWidth);
+  };
+
+  const handleDepthChange = (nextDepth: number) => {
+    const safeDepth = Math.max(0.1, nextDepth);
+    if (points) {
+      const ratio = safeDepth / Math.max(0.1, depth);
+      setPoints(points.map((point) => roundPoint({ x: point.x, z: point.z * ratio })));
+    }
+    setDepth(safeDepth);
+  };
 
   const toggleArea = (areaId: string) => {
     const adding = !areaIds.includes(areaId);
@@ -115,7 +229,13 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
       name: name.trim(),
       haAreaIds: areaIds,
       anchor: position,
-      zone: { width, height, depth, rotationY },
+      zone: {
+        width,
+        height,
+        depth,
+        rotationY,
+        points: points?.map(roundPoint),
+      },
       primaryEntityIds: orderedPrimaryIds,
     });
   };
@@ -153,8 +273,13 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
       </AccordionSection>
 
       <AccordionSection title={t('rooms.zone')} defaultOpen>
-        <SliderNumberRow label={t('form.width')} value={width} onChange={setWidth} step={0.01} span={1.5} min={0.1} max={50} fallback={1} />
-        <SliderNumberRow label={t('form.depth')} value={depth} onChange={setDepth} step={0.01} span={1.5} min={0.1} max={50} fallback={1} />
+        <div className="room-zone-summary">
+          <span>{points ? t('rooms.polygon') : t('rooms.rectangle')}</span>
+          <span>{t('rooms.pointsCount', { count: effectivePoints.length })}</span>
+        </div>
+        <div className="room-form-note">{t('rooms.pointEditHint')}</div>
+        <SliderNumberRow label={t('form.width')} value={width} onChange={handleWidthChange} step={0.01} span={1.5} min={0.1} max={50} fallback={1} />
+        <SliderNumberRow label={t('form.depth')} value={depth} onChange={handleDepthChange} step={0.01} span={1.5} min={0.1} max={50} fallback={1} />
         <SliderNumberRow label={t('rooms.rotation')} value={rotationY} onChange={setRotationY} step={0.5} span={45} min={-180} max={180} />
       </AccordionSection>
 
