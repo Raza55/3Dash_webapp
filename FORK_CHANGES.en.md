@@ -91,6 +91,9 @@ are used.
 - While editing, only the active room area is shown. Stale preview surfaces, outlines,
   and corner handles are fully removed before each rebuild so they cannot overlap
   while being moved.
+- Room names use compact labels scaled to their room and appear only on hover or for
+  an active selection. In the Rooms tab, clicking a room area takes precedence over
+  overlapping lights and other objects.
 - Assigned entities are ranked by Safety, Primary Controls, Climate, Media, and Room
   Status. Diagnostic, configuration, disabled, and hidden entities are omitted by
   default.

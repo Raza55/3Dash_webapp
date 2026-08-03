@@ -74,11 +74,13 @@ import ModelObjectList, { type ModelObjectEditMode, type ModelObjectListItem } f
 import { createTubeMeshes, removeTubeMeshes, disposeAllTubes, renderMockupLabels, type TubeMap } from '../../babylon/TubeMeshFactory';
 import { createSmartDeviceMesh, rebuildAllSmartDeviceMeshes, removeSmartDeviceMesh, type SmartDeviceMeshMap } from '../../babylon/SmartDeviceMeshFactory';
 import {
+  createRoomZoneLabel,
   createRoomZoneSurface,
   disposeAllRoomZones,
   rebuildAllRoomZones,
   rectangleRoomZonePoints,
   roomZoneOutlinePoints,
+  setRoomZoneLabelVisibility,
   updateRoomZoneSurface,
   type RoomZoneMeshMap,
 } from '../../babylon/RoomZoneMeshFactory';
@@ -386,6 +388,7 @@ export default function ConfigEditor() {
   const roomSelectedPointRef = useRef<number | null>(roomSelectedPoint);
   roomSelectedPointRef.current = roomSelectedPoint;
   const roomPreviewInfoRef = useRef<RoomPreviewInfo>({
+    name: '',
     size: { width: editorDefaultSizes.wall.width, height: 0.025, depth: editorDefaultSizes.wall.depth },
     rotation: { x: 0, y: 0, z: 0 },
     points: rectangleRoomZonePoints(editorDefaultSizes.wall.width, editorDefaultSizes.wall.depth),
@@ -433,6 +436,7 @@ export default function ConfigEditor() {
     }
     if (!roomPanelOpenRef.current) {
       roomPreviewInfoRef.current = {
+        name: '',
         size: { width: editorDefaultSizes.wall.width, height: 0.025, depth: editorDefaultSizes.wall.depth },
         rotation: { x: 0, y: 0, z: 0 },
         points: rectangleRoomZonePoints(editorDefaultSizes.wall.width, editorDefaultSizes.wall.depth),
@@ -1286,6 +1290,16 @@ export default function ConfigEditor() {
     outline.isPickable = false;
     outline.metadata = { previewTarget: 'roomOutline' };
 
+    createRoomZoneLabel(
+      scene,
+      'preview',
+      info.name,
+      points,
+      new Vector3(0, height, 0),
+      root,
+      true,
+    );
+
     const selectedPoint = roomSelectedPointRef.current !== null
       && roomSelectedPointRef.current < points.length
       ? roomSelectedPointRef.current
@@ -1592,7 +1606,8 @@ export default function ConfigEditor() {
     }
 
     // Pointer move — coordinate readout
-    ctx.scene.onPointerMove = (_evt, pick) => {
+    let hoveredRoomId: string | null = null;
+    ctx.scene.onPointerMove = (evt, pick) => {
       if (pick.hit && pick.pickedPoint) {
         const p = worldToConfigPosition(pick.pickedPoint, modelScaleRef.current);
         setCoordText(`x: ${p.x.toFixed(2)}  z: ${p.y.toFixed(2)}  y: ${p.z.toFixed(2)}`);
@@ -1601,6 +1616,23 @@ export default function ConfigEditor() {
         setCoordText(t('editor.coordEmpty'));
         if (!placingModeRef.current && canvas) canvas.style.cursor = 'default';
       }
+
+      const roomHoverPick = editorModeRef.current === 'rooms' && !roomPanelOpenRef.current
+        ? ctx.scene.pick(
+          evt.offsetX,
+          evt.offsetY,
+          (mesh) => Boolean(mesh.metadata?.roomId) && !mesh.metadata?.roomLabel,
+        )
+        : null;
+      const nextHoveredRoomId = roomHoverPick?.hit
+        ? roomHoverPick.pickedMesh?.metadata?.roomId as string | undefined
+        : undefined;
+      const nextRoomId = nextHoveredRoomId ?? null;
+      if (nextRoomId !== hoveredRoomId) {
+        hoveredRoomId = nextRoomId;
+        setRoomZoneLabelVisibility(roomZoneMeshMapRef.current, hoveredRoomId);
+      }
+      if (!placingModeRef.current && canvas && hoveredRoomId) canvas.style.cursor = 'pointer';
     };
 
     // Track pointer start position to distinguish clicks from drags
@@ -1633,6 +1665,7 @@ export default function ConfigEditor() {
             },
           );
           const nextInfo: RoomPreviewInfo = {
+            name: currentInfo.name,
             size: { ...currentInfo.size, width: trace.width, depth: trace.depth },
             rotation: { x: 0, y: 0, z: 0 },
             points: trace.points,
@@ -1769,6 +1802,22 @@ export default function ConfigEditor() {
       // Skip click-to-edit while another placed object is being edited.
       if (displayPanelOpenRef.current || blindPanelOpenRef.current || wallPanelOpenRef.current || smartDevicePanelOpenRef.current || tubePanelOpenRef.current) return;
 
+      if (editorModeRef.current === 'rooms') {
+        const roomPick = ctx.scene.pick(
+          evt.offsetX,
+          evt.offsetY,
+          (mesh) => Boolean(mesh.metadata?.roomId) && !mesh.metadata?.roomLabel,
+        );
+        const clickedId = roomPick?.hit
+          ? roomPick.pickedMesh?.metadata?.roomId as string | undefined
+          : undefined;
+        if (clickedId) {
+          const idx = roomsRef.current.findIndex((room) => room.id === clickedId);
+          if (idx !== -1) handleEditRoomRef.current(idx);
+        }
+        return;
+      }
+
       // Pick under pointer
       const pick = ctx.scene.pick(evt.offsetX, evt.offsetY);
       if (!pick?.hit) return;
@@ -1821,11 +1870,6 @@ export default function ConfigEditor() {
         }
       }
 
-      if (pick.pickedMesh?.metadata?.roomId) {
-        const clickedId = pick.pickedMesh.metadata.roomId;
-        const idx = roomsRef.current.findIndex((room) => room.id === clickedId);
-        if (idx !== -1) handleEditRoomRef.current(idx);
-      }
     };
 
     init();
@@ -3008,6 +3052,7 @@ export default function ConfigEditor() {
       primaryEntityIds: [],
     };
     roomPreviewInfoRef.current = {
+      name: draft.name,
       size: { width: editorDefaultSizes.wall.width, height: 0.025, depth: editorDefaultSizes.wall.depth },
       rotation: { x: 0, y: 0, z: 0 },
       points: initialPoints,
@@ -3031,6 +3076,7 @@ export default function ConfigEditor() {
     const room = rooms[idx];
     if (!room) return;
     roomPreviewInfoRef.current = {
+      name: room.name,
       size: {
         width: room.zone.width,
         height: room.zone.height ?? 0.025,

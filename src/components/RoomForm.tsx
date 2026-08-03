@@ -8,6 +8,7 @@ import { useTranslation } from '../contexts/LanguageContext';
 import { rectangleRoomZonePoints } from '../babylon/RoomZoneMeshFactory';
 
 export interface RoomPreviewInfo {
+  name: string;
   size: { width: number; height: number; depth: number };
   rotation: LightPosition;
   points: RoomZonePoint[];
@@ -186,11 +187,12 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
   useEffect(() => {
     if (!open) return;
     onPreviewChange({
+      name,
       size: { width, height, depth },
       rotation: { x: 0, y: rotationY, z: 0 },
       points: effectivePoints,
     });
-  }, [depth, effectivePoints, height, onPreviewChange, open, rotationY, width]);
+  }, [depth, effectivePoints, height, name, onPreviewChange, open, rotationY, width]);
 
   const handleWidthChange = (nextWidth: number) => {
     const safeWidth = Math.max(0.1, nextWidth);

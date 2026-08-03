@@ -92,6 +92,9 @@ entsprechenden Editor-Funktionen gesetzt.
 - Beim Bearbeiten wird nur die aktive Raumfläche angezeigt. Veraltete Vorschauflächen,
   Konturen und Eckpunktgriffe werden vor jedem Neuaufbau vollständig entfernt, damit
   sie sich beim Verschieben nicht überlagern.
+- Raumnamen erscheinen als kompakte, raumbezogen skalierte Schilder erst beim
+  Darüberfahren oder bei einer aktiven Auswahl. Im Räume-Tab haben Raumflächen beim
+  Anklicken Vorrang vor darüberliegenden Lampen und anderen Objekten.
 - Zugeordnete Entities werden nach Sicherheit, Hauptsteuerung, Klima, Medien und
   Raumstatus priorisiert. Diagnostik-, Konfigurations- und deaktivierte Entities werden
   standardmäßig ausgeblendet.

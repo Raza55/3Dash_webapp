@@ -24,6 +24,12 @@ export interface RoomZoneMeshEntry {
 
 export type RoomZoneMeshMap = Record<string, RoomZoneMeshEntry>;
 
+export interface RoomZoneLabelEntry {
+  label: Mesh;
+  labelMaterial: StandardMaterial;
+  labelTexture: DynamicTexture;
+}
+
 export function removeRoomZoneMesh(map: RoomZoneMeshMap, roomId: string): void {
   const entry = map[roomId];
   if (!entry) return;
@@ -169,6 +175,79 @@ export function roomZoneOutlinePoints(points: RoomZonePoint[], height: number): 
   return [...points, points[0]].map((point) => new Vector3(point.x, y, point.z));
 }
 
+export function createRoomZoneLabel(
+  scene: Scene,
+  id: string,
+  text: string,
+  points: RoomZonePoint[],
+  surfacePosition: Vector3,
+  parent?: TransformNode,
+  visible = false,
+): RoomZoneLabelEntry {
+  const xs = points.map((point) => point.x);
+  const zs = points.map((point) => point.z);
+  const roomSpan = Math.max(
+    0.1,
+    Math.max(...xs) - Math.min(...xs),
+    Math.max(...zs) - Math.min(...zs),
+  );
+  const labelWidth = Math.min(0.58, Math.max(0.22, roomSpan * 0.4));
+  const labelHeight = labelWidth / 4;
+  const labelText = text.trim() || 'Room';
+
+  const labelTexture = new DynamicTexture(`room-label-texture-${id}`, { width: 512, height: 128 }, scene, true);
+  labelTexture.hasAlpha = true;
+  const context = labelTexture.getContext();
+  context.clearRect(0, 0, 512, 128);
+  let fontSize = 42;
+  while (fontSize > 24) {
+    context.font = `bold ${fontSize}px Arial`;
+    if (context.measureText(labelText).width <= 440) break;
+    fontSize -= 2;
+  }
+  labelTexture.drawText(
+    labelText,
+    null,
+    64 + fontSize * 0.34,
+    `bold ${fontSize}px Arial`,
+    '#e8f7ff',
+    'rgba(4, 15, 28, 0.86)',
+    true,
+    true,
+  );
+
+  const label = MeshBuilder.CreatePlane(`room-label-${id}`, { width: labelWidth, height: labelHeight }, scene);
+  label.position.copyFrom(surfacePosition);
+  label.position.y += labelHeight * 0.9;
+  label.billboardMode = Mesh.BILLBOARDMODE_ALL;
+  label.metadata = { roomId: id, roomLabel: true };
+  label.isPickable = false;
+  label.renderingGroupId = 2;
+  if (parent) label.parent = parent;
+
+  const labelMaterial = new StandardMaterial(`room-label-material-${id}`, scene);
+  labelMaterial.diffuseTexture = labelTexture;
+  labelMaterial.emissiveColor = Color3.White();
+  labelMaterial.opacityTexture = labelTexture;
+  labelMaterial.disableLighting = true;
+  labelMaterial.disableDepthWrite = true;
+  labelMaterial.backFaceCulling = false;
+  label.material = labelMaterial;
+  label.setEnabled(visible);
+
+  return { label, labelMaterial, labelTexture };
+}
+
+export function setRoomZoneLabelVisibility(
+  map: RoomZoneMeshMap,
+  hoveredRoomId: string | null,
+  selectedRoomId: string | null = null,
+): void {
+  for (const [roomId, entry] of Object.entries(map)) {
+    entry.label.setEnabled(roomId === hoveredRoomId || roomId === selectedRoomId);
+  }
+}
+
 export function disposeAllRoomZones(map: RoomZoneMeshMap): void {
   for (const roomId of Object.keys(map)) removeRoomZoneMesh(map, roomId);
 }
@@ -206,25 +285,15 @@ export function createRoomZoneMesh(
   outline.isPickable = false;
   if (parent) outline.parent = parent;
 
-  const labelTexture = new DynamicTexture(`room-label-texture-${room.id}`, { width: 512, height: 128 }, scene, true);
-  labelTexture.hasAlpha = true;
-  labelTexture.getContext().clearRect(0, 0, 512, 128);
-  labelTexture.drawText(room.name, null, 78, 'bold 42px Arial', '#e8f7ff', 'rgba(4, 15, 28, 0.82)', true, true);
-
-  const label = MeshBuilder.CreatePlane(`room-label-${room.id}`, { width: 1.8, height: 0.45 }, scene);
-  label.position.set(room.anchor.x, room.anchor.y + 0.28, room.anchor.z);
-  label.billboardMode = Mesh.BILLBOARDMODE_ALL;
-  label.metadata = { roomId: room.id };
-  label.isPickable = true;
-  if (parent) label.parent = parent;
-
-  const labelMaterial = new StandardMaterial(`room-label-material-${room.id}`, scene);
-  labelMaterial.diffuseTexture = labelTexture;
-  labelMaterial.emissiveColor = Color3.White();
-  labelMaterial.opacityTexture = labelTexture;
-  labelMaterial.disableLighting = true;
-  labelMaterial.backFaceCulling = false;
-  label.material = labelMaterial;
+  const { label, labelMaterial, labelTexture } = createRoomZoneLabel(
+    scene,
+    room.id,
+    room.name,
+    points,
+    new Vector3(room.anchor.x, room.anchor.y + height, room.anchor.z),
+    parent,
+    selected,
+  );
 
   return { zone, outline, label, zoneMaterial, labelMaterial, labelTexture };
 }
