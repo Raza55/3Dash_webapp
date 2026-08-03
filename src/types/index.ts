@@ -174,6 +174,8 @@ export interface RoomZone {
   depth: number;
   /** Optional polygon vertices relative to the room anchor on the floor plane. */
   points?: RoomZonePoint[];
+  /** Editor-defined line segments that act as finite walls during room detection. */
+  virtualWalls?: RoomVirtualWall[];
   /** Thin editor-only floor marker height. */
   height?: number;
   /** Rotation around the vertical axis in degrees. */
@@ -183,6 +185,11 @@ export interface RoomZone {
 export interface RoomZonePoint {
   x: number;
   z: number;
+}
+
+export interface RoomVirtualWall {
+  start: RoomZonePoint;
+  end: RoomZonePoint;
 }
 
 export interface RoomDashboardView {

@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from 'react';
-import type { LightPosition, RoomConfig, RoomZonePoint } from '../types';
+import type { LightPosition, RoomConfig, RoomVirtualWall, RoomZonePoint } from '../types';
 import type { HAAreaRegistryEntry, HARoomEntity } from '../services/haAreaRegistry';
 import { rankRoomEntities, type RoomEntityGroup } from '../utils/roomEntityPriority';
 import { AccordionSection, FormPanel } from './FormPanel';
@@ -12,6 +12,7 @@ export interface RoomPreviewInfo {
   size: { width: number; height: number; depth: number };
   rotation: LightPosition;
   points: RoomZonePoint[];
+  virtualWalls: RoomVirtualWall[];
 }
 
 export interface RoomFormHandle {
@@ -23,6 +24,10 @@ export interface RoomFormHandle {
   removePoint: (index: number) => void;
   resetPoints: () => void;
   applyDetectedPolygon: (points: RoomZonePoint[]) => void;
+  addVirtualWall: (wall: RoomVirtualWall) => number;
+  setVirtualWalls: (walls: RoomVirtualWall[]) => void;
+  updateVirtualWallEndpoint: (index: number, endpoint: 'start' | 'end', point: RoomZonePoint) => void;
+  removeVirtualWall: (index: number) => void;
 }
 
 interface Props {
@@ -53,6 +58,10 @@ function roundPoint(point: RoomZonePoint): RoomZonePoint {
   };
 }
 
+function roundVirtualWall(wall: RoomVirtualWall): RoomVirtualWall {
+  return { start: roundPoint(wall.start), end: roundPoint(wall.end) };
+}
+
 function pointBounds(points: RoomZonePoint[]): { width: number; depth: number } {
   const xs = points.map((point) => point.x);
   const zs = points.map((point) => point.z);
@@ -74,6 +83,7 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
   const [depth, setDepth] = useState(defaultZone.depth);
   const [rotationY, setRotationY] = useState(0);
   const [points, setPoints] = useState<RoomZonePoint[] | null>(null);
+  const [virtualWalls, setVirtualWalls] = useState<RoomVirtualWall[]>([]);
   const [primaryEntityIds, setPrimaryEntityIds] = useState<string[]>([]);
   const [showAll, setShowAll] = useState(false);
   const [selectionTouched, setSelectionTouched] = useState(false);
@@ -121,6 +131,10 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
         setWidth((current) => parseFloat(Math.max(0.1, current * scaleX).toFixed(3)));
         setDepth((current) => parseFloat(Math.max(0.1, current * scaleZ).toFixed(3)));
       }
+      setVirtualWalls((current) => current.map((wall) => roundVirtualWall({
+        start: { x: wall.start.x * scaleX, z: wall.start.z * scaleZ },
+        end: { x: wall.end.x * scaleX, z: wall.end.z * scaleZ },
+      })));
       setHeight((current) => parseFloat(Math.max(0.01, current * scaleY).toFixed(3)));
     },
     updatePoint,
@@ -163,6 +177,20 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
       setRotationY(0);
       applyPointDimensions(next);
     },
+    addVirtualWall: (wall) => {
+      const index = virtualWalls.length;
+      setVirtualWalls((current) => [...current, roundVirtualWall(wall)]);
+      return index;
+    },
+    setVirtualWalls: (walls) => setVirtualWalls(walls.map(roundVirtualWall)),
+    updateVirtualWallEndpoint: (index, endpoint, point) => {
+      setVirtualWalls((current) => current.map((wall, currentIndex) => currentIndex === index
+        ? { ...wall, [endpoint]: roundPoint(point) }
+        : wall));
+    },
+    removeVirtualWall: (index) => {
+      setVirtualWalls((current) => current.filter((_, currentIndex) => currentIndex !== index));
+    },
   }));
 
   useEffect(() => {
@@ -174,6 +202,7 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
     setDepth(room?.zone.depth ?? defaultZone.depth);
     setRotationY(room?.zone.rotationY ?? 0);
     setPoints(room?.zone.points?.length ? room.zone.points.map(roundPoint) : null);
+    setVirtualWalls(room?.zone.virtualWalls?.map(roundVirtualWall) ?? []);
     setPrimaryEntityIds(room?.primaryEntityIds ?? []);
     setShowAll(false);
     setSelectionTouched(!isNew);
@@ -191,24 +220,33 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
       size: { width, height, depth },
       rotation: { x: 0, y: rotationY, z: 0 },
       points: effectivePoints,
+      virtualWalls,
     });
-  }, [depth, effectivePoints, height, name, onPreviewChange, open, rotationY, width]);
+  }, [depth, effectivePoints, height, name, onPreviewChange, open, rotationY, virtualWalls, width]);
 
   const handleWidthChange = (nextWidth: number) => {
     const safeWidth = Math.max(0.1, nextWidth);
+    const ratio = safeWidth / Math.max(0.1, width);
     if (points) {
-      const ratio = safeWidth / Math.max(0.1, width);
       setPoints(points.map((point) => roundPoint({ x: point.x * ratio, z: point.z })));
     }
+    setVirtualWalls((current) => current.map((wall) => roundVirtualWall({
+      start: { x: wall.start.x * ratio, z: wall.start.z },
+      end: { x: wall.end.x * ratio, z: wall.end.z },
+    })));
     setWidth(safeWidth);
   };
 
   const handleDepthChange = (nextDepth: number) => {
     const safeDepth = Math.max(0.1, nextDepth);
+    const ratio = safeDepth / Math.max(0.1, depth);
     if (points) {
-      const ratio = safeDepth / Math.max(0.1, depth);
       setPoints(points.map((point) => roundPoint({ x: point.x, z: point.z * ratio })));
     }
+    setVirtualWalls((current) => current.map((wall) => roundVirtualWall({
+      start: { x: wall.start.x, z: wall.start.z * ratio },
+      end: { x: wall.end.x, z: wall.end.z * ratio },
+    })));
     setDepth(safeDepth);
   };
 
@@ -246,6 +284,7 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
         depth,
         rotationY,
         points: points?.map(roundPoint),
+        virtualWalls: virtualWalls.length ? virtualWalls.map(roundVirtualWall) : undefined,
       },
       primaryEntityIds: orderedPrimaryIds,
     });
@@ -298,6 +337,12 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
               <span>{t('rooms.pointsCount', { count: effectivePoints.length })}</span>
             </div>
             <div className="room-form-note">{t('rooms.pointEditHint')}</div>
+            {virtualWalls.length > 0 && (
+              <div className="room-zone-summary">
+                <span>{t('rooms.virtualWalls')}</span>
+                <span>{t('rooms.virtualWallsCount', { count: virtualWalls.length })}</span>
+              </div>
+            )}
             <SliderNumberRow label={t('form.width')} value={width} onChange={handleWidthChange} step={0.01} span={1.5} min={0.1} max={50} fallback={1} />
             <SliderNumberRow label={t('form.depth')} value={depth} onChange={handleDepthChange} step={0.01} span={1.5} min={0.1} max={50} fallback={1} />
             <SliderNumberRow label={t('rooms.rotation')} value={rotationY} onChange={setRotationY} step={0.5} span={45} min={-180} max={180} />

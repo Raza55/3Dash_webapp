@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Activity, Box, BrickWall, Crosshair, House, Image as ImageIcon, ImageOff, LampCeiling, MapPin, Monitor, Move3d, PanelTopClose, Plus, Rotate3d, Scale3d, Square, Trash2, Cpu } from 'lucide-react';
+import { Activity, Box, BrickWall, Crosshair, Eraser, House, Image as ImageIcon, ImageOff, LampCeiling, MapPin, Minus, Monitor, Move3d, PanelTopClose, Plus, Rotate3d, Scale3d, Square, Trash2, Cpu } from 'lucide-react';
 import { generateUUID } from '../../utils/uuid';
 import {
   Vector3,
@@ -19,6 +19,7 @@ import {
   ScaleGizmo,
   Space,
   Mesh,
+  Matrix,
   type AbstractMesh,
   type LinesMesh,
   type Observer,
@@ -91,11 +92,12 @@ import { useTranslation } from '../../contexts/LanguageContext';
 import GuidedTour from '../../components/GuidedTour/GuidedTour';
 import { editorTourSteps } from '../../components/GuidedTour/tourSteps';
 import { discoverHAAreas, type HAAreaRegistryEntry, type HARoomEntity } from '../../services/haAreaRegistry';
-import type { LightConfig, LightGroup, DisplayConfig, BlindConfig, ShadowWallConfig, SmartDeviceConfig, TubeConfig, LightPosition, ImportedModelObjectConfig, ModelObjectOverride, ModelObjectTransform, RoomConfig, RoomZonePoint } from '../../types';
+import type { LightConfig, LightGroup, DisplayConfig, BlindConfig, ShadowWallConfig, SmartDeviceConfig, TubeConfig, LightPosition, ImportedModelObjectConfig, ModelObjectOverride, ModelObjectTransform, RoomConfig, RoomVirtualWall, RoomZonePoint } from '../../types';
 import './ConfigEditor.css';
 
 type ActiveGizmo = PositionGizmo | RotationGizmo | ScaleGizmo;
 type EditorTransformMode = ModelObjectEditMode;
+type RoomVirtualWallEndpoint = { wallIndex: number; endpoint: 'start' | 'end' };
 
 const TRANSFORM_MODES: EditorTransformMode[] = ['move', 'rotate', 'scale'];
 const DEFAULT_EDITOR_SIZES = sceneRelativeDefaults(10);
@@ -114,6 +116,37 @@ const NANOLEAF_PANEL_COORDS: Array<[number, number]> = [
 
 function roundValue(value: number, decimals = 3): number {
   return parseFloat(value.toFixed(decimals));
+}
+
+function worldPointToRoomLocal(
+  point: Vector3,
+  anchor: LightPosition,
+  rotationY: number,
+  modelScale: number,
+): RoomZonePoint {
+  const configPoint = worldToConfigPosition(point, modelScale);
+  const local = Vector3.TransformCoordinates(
+    new Vector3(configPoint.x - anchor.x, 0, configPoint.z - anchor.z),
+    Matrix.RotationY(Tools.ToRadians(-rotationY)),
+  );
+  return { x: roundValue(local.x), z: roundValue(local.z) };
+}
+
+function roomVirtualWallsToWorld(
+  walls: RoomVirtualWall[],
+  anchor: LightPosition,
+  rotationY: number,
+  modelScale: number,
+): RoomVirtualWall[] {
+  const rotation = Matrix.RotationY(Tools.ToRadians(rotationY));
+  const convert = (point: RoomZonePoint): RoomZonePoint => {
+    const rotated = Vector3.TransformCoordinates(new Vector3(point.x, 0, point.z), rotation);
+    return {
+      x: (anchor.x + rotated.x) * modelScale,
+      z: (anchor.z + rotated.z) * modelScale,
+    };
+  };
+  return walls.map((wall) => ({ start: convert(wall.start), end: convert(wall.end) }));
 }
 
 function createNanoleafPreviewMesh(scene: Scene, name: string, size: Record<string, number>): Mesh {
@@ -269,6 +302,10 @@ export default function ConfigEditor() {
   const roomPreviewSurfaceRef = useRef<Mesh | null>(null);
   const roomPreviewOutlineRef = useRef<LinesMesh | null>(null);
   const roomPreviewPointHandlesRef = useRef<Mesh[]>([]);
+  const roomPreviewVirtualWallMeshesRef = useRef<Mesh[]>([]);
+  const roomPreviewVirtualWallHandlesRef = useRef<Mesh[]>([]);
+  const roomVirtualWallDraftLineRef = useRef<LinesMesh | null>(null);
+  const roomVirtualWallDraftHandlesRef = useRef<Mesh[]>([]);
   const tubeAnchorRef = useRef<Mesh | null>(null);
 
   const [haEntities, setHaEntities] = useState<HAEntityOption[]>(() => getEntityCache());
@@ -381,19 +418,33 @@ export default function ConfigEditor() {
   const roomZoneReadyRef = useRef(roomZoneReady);
   roomZoneReadyRef.current = roomZoneReady;
   const [roomSelectedPoint, setRoomSelectedPoint] = useState<number | null>(null);
+  const [roomSelectedVirtualWall, setRoomSelectedVirtualWall] = useState<number | null>(null);
+  const [roomSelectedVirtualWallEndpoint, setRoomSelectedVirtualWallEndpoint] = useState<RoomVirtualWallEndpoint | null>(null);
+  const [roomVirtualWallDrawing, setRoomVirtualWallDrawing] = useState(false);
+  const [roomVirtualWallStartSet, setRoomVirtualWallStartSet] = useState(false);
   const [roomPointCount, setRoomPointCount] = useState(4);
   const [roomGizmoActive, setRoomGizmoActive] = useState(false);
   const roomGizmoActiveRef = useRef(roomGizmoActive);
   roomGizmoActiveRef.current = roomGizmoActive;
   const roomSelectedPointRef = useRef<number | null>(roomSelectedPoint);
   roomSelectedPointRef.current = roomSelectedPoint;
+  const roomSelectedVirtualWallRef = useRef<number | null>(roomSelectedVirtualWall);
+  roomSelectedVirtualWallRef.current = roomSelectedVirtualWall;
+  const roomSelectedVirtualWallEndpointRef = useRef<RoomVirtualWallEndpoint | null>(roomSelectedVirtualWallEndpoint);
+  roomSelectedVirtualWallEndpointRef.current = roomSelectedVirtualWallEndpoint;
+  const roomVirtualWallDrawingRef = useRef(roomVirtualWallDrawing);
+  roomVirtualWallDrawingRef.current = roomVirtualWallDrawing;
+  const roomVirtualWallDraftStartRef = useRef<RoomZonePoint | null>(null);
+  const roomVirtualWallDraftEndRef = useRef<RoomZonePoint | null>(null);
   const roomPreviewInfoRef = useRef<RoomPreviewInfo>({
     name: '',
     size: { width: editorDefaultSizes.wall.width, height: 0.025, depth: editorDefaultSizes.wall.depth },
     rotation: { x: 0, y: 0, z: 0 },
     points: rectangleRoomZonePoints(editorDefaultSizes.wall.width, editorDefaultSizes.wall.depth),
+    virtualWalls: [],
   });
   const handleCloseRoomPanelRef = useRef<() => void>(() => {});
+  const handleCancelRoomVirtualWallDrawingRef = useRef<() => void>(() => {});
 
   const placedEntityIds = useMemo(() => {
     const ids = new Set<string>();
@@ -440,6 +491,7 @@ export default function ConfigEditor() {
         size: { width: editorDefaultSizes.wall.width, height: 0.025, depth: editorDefaultSizes.wall.depth },
         rotation: { x: 0, y: 0, z: 0 },
         points: rectangleRoomZonePoints(editorDefaultSizes.wall.width, editorDefaultSizes.wall.depth),
+        virtualWalls: [],
       };
     }
   }, [editorDefaultSizes]);
@@ -877,6 +929,10 @@ export default function ConfigEditor() {
       roomPreviewSurfaceRef.current = null;
       roomPreviewOutlineRef.current = null;
       roomPreviewPointHandlesRef.current = [];
+      roomPreviewVirtualWallMeshesRef.current = [];
+      roomPreviewVirtualWallHandlesRef.current = [];
+      roomVirtualWallDraftLineRef.current = null;
+      roomVirtualWallDraftHandlesRef.current = [];
     }
     if (previewMeshRef.current) {
       previewMeshRef.current.material?.dispose();
@@ -1262,7 +1318,11 @@ export default function ConfigEditor() {
     const centreMaterial = new StandardMaterial('room-preview-centre-material', scene);
     centreMaterial.diffuseColor = new Color3(1, 0.72, 0.18);
     centreMaterial.emissiveColor = new Color3(0.48, 0.24, 0.03);
-    centreMaterial.alpha = roomGizmoActiveRef.current && roomSelectedPointRef.current === null ? 1 : 0.72;
+    centreMaterial.alpha = roomGizmoActiveRef.current
+      && roomSelectedPointRef.current === null
+      && roomSelectedVirtualWallEndpointRef.current === null
+      ? 1
+      : 0.72;
     centreMaterial.disableLighting = true;
     centreMaterial.disableDepthWrite = true;
     root.material = centreMaterial;
@@ -1289,6 +1349,92 @@ export default function ConfigEditor() {
     outline.alpha = 1;
     outline.isPickable = false;
     outline.metadata = { previewTarget: 'roomOutline' };
+
+    const selectedVirtualWallEndpoint = roomSelectedVirtualWallEndpointRef.current
+      && roomSelectedVirtualWallEndpointRef.current.wallIndex < info.virtualWalls.length
+      ? roomSelectedVirtualWallEndpointRef.current
+      : null;
+    const selectedVirtualWall = roomSelectedVirtualWallRef.current !== null
+      && roomSelectedVirtualWallRef.current < info.virtualWalls.length
+      ? roomSelectedVirtualWallRef.current
+      : selectedVirtualWallEndpoint?.wallIndex ?? null;
+    if (selectedVirtualWallEndpoint !== roomSelectedVirtualWallEndpointRef.current) {
+      roomSelectedVirtualWallEndpointRef.current = selectedVirtualWallEndpoint;
+      setRoomSelectedVirtualWallEndpoint(selectedVirtualWallEndpoint);
+    }
+    if (selectedVirtualWall !== roomSelectedVirtualWallRef.current) {
+      roomSelectedVirtualWallRef.current = selectedVirtualWall;
+      setRoomSelectedVirtualWall(selectedVirtualWall);
+    }
+
+    const virtualWallHeight = height + handleSize * 0.4;
+    const virtualWallMeshes: Mesh[] = [];
+    const virtualWallHandles: Mesh[] = [];
+    info.virtualWalls.forEach((wall, wallIndex) => {
+      const isSelected = wallIndex === selectedVirtualWall;
+      const path = [
+        new Vector3(wall.start.x, virtualWallHeight, wall.start.z),
+        new Vector3(wall.end.x, virtualWallHeight, wall.end.z),
+      ];
+      const wallMesh = MeshBuilder.CreateTube(`room-preview-virtual-wall-${wallIndex}`, {
+        path,
+        radius: Math.max(0.004, handleSize * 0.1),
+        tessellation: 8,
+        cap: Mesh.CAP_ALL,
+      }, scene);
+      wallMesh.parent = root;
+      wallMesh.metadata = {
+        previewTarget: 'roomVirtualWall',
+        roomEditorTarget: 'virtualWall',
+        roomVirtualWallIndex: wallIndex,
+      };
+      wallMesh.isPickable = true;
+      const wallMaterial = new StandardMaterial(`room-preview-virtual-wall-material-${wallIndex}`, scene);
+      wallMaterial.diffuseColor = isSelected ? new Color3(1, 0.72, 0.18) : new Color3(0.96, 0.42, 0.16);
+      wallMaterial.emissiveColor = isSelected ? new Color3(0.55, 0.3, 0.02) : new Color3(0.45, 0.12, 0.02);
+      wallMaterial.alpha = isSelected ? 1 : 0.88;
+      wallMaterial.disableLighting = true;
+      wallMaterial.disableDepthWrite = true;
+      wallMesh.material = wallMaterial;
+      wallMesh.renderingGroupId = 2;
+      virtualWallMeshes.push(wallMesh);
+
+      (['start', 'end'] as const).forEach((endpoint) => {
+        const point = wall[endpoint];
+        const endpointSelected = selectedVirtualWallEndpoint?.wallIndex === wallIndex
+          && selectedVirtualWallEndpoint.endpoint === endpoint;
+        const endpointHandle = MeshBuilder.CreateSphere(
+          `room-preview-virtual-wall-${wallIndex}-${endpoint}`,
+          { diameter: handleSize * 0.82, segments: 12 },
+          scene,
+        );
+        endpointHandle.parent = root;
+        endpointHandle.position.set(point.x, virtualWallHeight, point.z);
+        endpointHandle.metadata = {
+          previewTarget: 'roomVirtualWallEndpoint',
+          roomEditorTarget: 'virtualWallEndpoint',
+          roomVirtualWallIndex: wallIndex,
+          roomVirtualWallEndpoint: endpoint,
+        };
+        endpointHandle.isPickable = true;
+        const endpointMaterial = new StandardMaterial(
+          `room-preview-virtual-wall-${wallIndex}-${endpoint}-material`,
+          scene,
+        );
+        endpointMaterial.diffuseColor = endpointSelected
+          ? new Color3(1, 0.84, 0.3)
+          : new Color3(0.98, 0.5, 0.18);
+        endpointMaterial.emissiveColor = endpointSelected
+          ? new Color3(0.6, 0.38, 0.04)
+          : new Color3(0.45, 0.14, 0.02);
+        endpointMaterial.alpha = endpointSelected ? 1 : 0.9;
+        endpointMaterial.disableLighting = true;
+        endpointMaterial.disableDepthWrite = true;
+        endpointHandle.material = endpointMaterial;
+        endpointHandle.renderingGroupId = 2;
+        virtualWallHandles.push(endpointHandle);
+      });
+    });
 
     createRoomZoneLabel(
       scene,
@@ -1333,18 +1479,25 @@ export default function ConfigEditor() {
     roomPreviewSurfaceRef.current = surface;
     roomPreviewOutlineRef.current = outline;
     roomPreviewPointHandlesRef.current = handles;
+    roomPreviewVirtualWallMeshesRef.current = virtualWallMeshes;
+    roomPreviewVirtualWallHandlesRef.current = virtualWallHandles;
 
     if (!roomGizmoActiveRef.current) return;
 
     if (!utilLayerRef.current) utilLayerRef.current = new UtilityLayerRenderer(scene);
     const activeMode = transformModeRef.current;
-    const pointTarget = activeMode === 'move' && selectedPoint !== null ? handles[selectedPoint] : null;
-    const attached = pointTarget ?? root;
+    const wallEndpointTarget = activeMode === 'move' && selectedVirtualWallEndpoint
+      ? virtualWallHandles[selectedVirtualWallEndpoint.wallIndex * 2 + (selectedVirtualWallEndpoint.endpoint === 'end' ? 1 : 0)]
+      : null;
+    const pointTarget = activeMode === 'move' && !wallEndpointTarget && selectedPoint !== null
+      ? handles[selectedPoint]
+      : null;
+    const attached = wallEndpointTarget ?? pointTarget ?? root;
     const gizmo = createGizmoForMode(activeMode, utilLayerRef.current);
     gizmo.scaleRatio *= activeMode === 'move' ? 0.62 : 0.78;
     gizmo.anchorPoint = GizmoAnchorPoint.Pivot;
     gizmo.attachedMesh = attached;
-    if (gizmo instanceof PositionGizmo && pointTarget) {
+    if (gizmo instanceof PositionGizmo && (pointTarget || wallEndpointTarget)) {
       gizmo.yGizmo.isEnabled = false;
       gizmo.updateGizmoRotationToMatchAttachedMesh = false;
     }
@@ -1366,6 +1519,30 @@ export default function ConfigEditor() {
       }, scene);
     };
 
+    const updateDraggedVirtualWallEndpoint = () => {
+      if (!selectedVirtualWallEndpoint || !wallEndpointTarget) return;
+      const endpointPoint: RoomZonePoint = {
+        x: roundValue(wallEndpointTarget.position.x),
+        z: roundValue(wallEndpointTarget.position.z),
+      };
+      wallEndpointTarget.position.y = virtualWallHeight;
+      const nextWalls = roomPreviewInfoRef.current.virtualWalls.map((wall, index) => index === selectedVirtualWallEndpoint.wallIndex
+        ? { ...wall, [selectedVirtualWallEndpoint.endpoint]: endpointPoint }
+        : wall);
+      roomPreviewInfoRef.current = { ...roomPreviewInfoRef.current, virtualWalls: nextWalls };
+      const changedWall = nextWalls[selectedVirtualWallEndpoint.wallIndex];
+      const changedMesh = virtualWallMeshes[selectedVirtualWallEndpoint.wallIndex];
+      if (changedWall && changedMesh) {
+        MeshBuilder.CreateTube(changedMesh.name, {
+          path: [
+            new Vector3(changedWall.start.x, virtualWallHeight, changedWall.start.z),
+            new Vector3(changedWall.end.x, virtualWallHeight, changedWall.end.z),
+          ],
+          instance: changedMesh,
+        }, scene);
+      }
+    };
+
     gizmo.onDragStartObservable.add(() => {
       draggingGizmoRef.current = true;
       if (activeMode === 'move' && selectedPoint === null) {
@@ -1374,6 +1551,10 @@ export default function ConfigEditor() {
     });
     gizmo.onDragObservable.add(() => {
       if (activeMode !== 'move') return;
+      if (selectedVirtualWallEndpoint !== null) {
+        updateDraggedVirtualWallEndpoint();
+        return;
+      }
       if (selectedPoint !== null) {
         updateDraggedPoint();
         return;
@@ -1395,6 +1576,16 @@ export default function ConfigEditor() {
           y: Math.max(0.001, root.scaling.y),
           z: Math.max(0.001, root.scaling.z),
         });
+      } else if (selectedVirtualWallEndpoint && wallEndpointTarget) {
+        updateDraggedVirtualWallEndpoint();
+        roomFormRef.current?.updateVirtualWallEndpoint(
+          selectedVirtualWallEndpoint.wallIndex,
+          selectedVirtualWallEndpoint.endpoint,
+          {
+            x: roundValue(wallEndpointTarget.position.x),
+            z: roundValue(wallEndpointTarget.position.z),
+          },
+        );
       } else if (selectedPoint !== null && pointTarget) {
         updateDraggedPoint();
         roomFormRef.current?.updatePoint(selectedPoint, {
@@ -1408,6 +1599,53 @@ export default function ConfigEditor() {
     setUtilityMeshAlpha(utilLayerRef.current, 0.55);
     gizmoRef.current = gizmo;
   }, [clearPreview, flushGizmoPosition, scheduleGizmoPosition]);
+
+  const clearRoomVirtualWallDraft = useCallback(() => {
+    roomVirtualWallDraftLineRef.current?.dispose();
+    roomVirtualWallDraftLineRef.current = null;
+    for (const handle of roomVirtualWallDraftHandlesRef.current) handle.dispose(false, true);
+    roomVirtualWallDraftHandlesRef.current = [];
+  }, []);
+
+  const updateRoomVirtualWallDraft = useCallback((start: RoomZonePoint, end: RoomZonePoint) => {
+    const scene = sceneCtxRef.current?.scene;
+    const root = roomPreviewRootRef.current;
+    if (!scene || !root) return;
+    const height = Math.max(0.012, roomPreviewInfoRef.current.size.height) + 0.014;
+    const path = [new Vector3(start.x, height, start.z), new Vector3(end.x, height, end.z)];
+    if (roomVirtualWallDraftLineRef.current) {
+      MeshBuilder.CreateLines(roomVirtualWallDraftLineRef.current.name, {
+        points: path,
+        instance: roomVirtualWallDraftLineRef.current,
+      }, scene);
+    } else {
+      const line = MeshBuilder.CreateLines('room-virtual-wall-draft', { points: path }, scene);
+      line.parent = root;
+      line.color = new Color3(1, 0.62, 0.18);
+      line.alpha = 1;
+      line.isPickable = false;
+      line.renderingGroupId = 2;
+      roomVirtualWallDraftLineRef.current = line;
+      roomVirtualWallDraftHandlesRef.current = (['start', 'end'] as const).map((endpoint) => {
+        const handle = MeshBuilder.CreateSphere(`room-virtual-wall-draft-${endpoint}`, {
+          diameter: 0.045,
+          segments: 10,
+        }, scene);
+        handle.parent = root;
+        handle.isPickable = false;
+        const material = new StandardMaterial(`room-virtual-wall-draft-${endpoint}-material`, scene);
+        material.diffuseColor = new Color3(1, 0.62, 0.18);
+        material.emissiveColor = new Color3(0.5, 0.2, 0.02);
+        material.disableLighting = true;
+        material.disableDepthWrite = true;
+        handle.material = material;
+        handle.renderingGroupId = 2;
+        return handle;
+      });
+    }
+    roomVirtualWallDraftHandlesRef.current[0]?.position.set(start.x, height, start.z);
+    roomVirtualWallDraftHandlesRef.current[1]?.position.set(end.x, height, end.z);
+  }, []);
 
   // Placing mode
   const enterPlacingMode = useCallback(() => {
@@ -1441,6 +1679,23 @@ export default function ConfigEditor() {
     const radiusForWidth = (ms.x / 2) / (Math.tan(fov / 2) * aspect * 0.75);
     return Math.max(radiusForHeight, radiusForWidth);
   }, []);
+
+  const cancelRoomVirtualWallDrawing = useCallback(() => {
+    roomVirtualWallDrawingRef.current = false;
+    roomVirtualWallDraftStartRef.current = null;
+    roomVirtualWallDraftEndRef.current = null;
+    setRoomVirtualWallDrawing(false);
+    setRoomVirtualWallStartSet(false);
+    clearRoomVirtualWallDraft();
+    const ctx = sceneCtxRef.current;
+    if (ctx && canvasRef.current) {
+      ctx.camera.inputs.addPointers();
+      applyCameraControlSensitivity(ctx.camera);
+      ctx.camera.attachControl(canvasRef.current, true);
+      canvasRef.current.style.cursor = 'default';
+    }
+  }, [clearRoomVirtualWallDraft]);
+  handleCancelRoomVirtualWallDrawingRef.current = cancelRoomVirtualWallDrawing;
 
   const recenterView = useCallback(() => {
     const ctx = sceneCtxRef.current;
@@ -1611,10 +1866,24 @@ export default function ConfigEditor() {
       if (pick.hit && pick.pickedPoint) {
         const p = worldToConfigPosition(pick.pickedPoint, modelScaleRef.current);
         setCoordText(`x: ${p.x.toFixed(2)}  z: ${p.y.toFixed(2)}  y: ${p.z.toFixed(2)}`);
-        if (placingModeRef.current && canvas) canvas.style.cursor = 'crosshair';
+        if ((placingModeRef.current || roomVirtualWallDrawingRef.current) && canvas) canvas.style.cursor = 'crosshair';
       } else {
         setCoordText(t('editor.coordEmpty'));
-        if (!placingModeRef.current && canvas) canvas.style.cursor = 'default';
+        if (!placingModeRef.current && !roomVirtualWallDrawingRef.current && canvas) canvas.style.cursor = 'default';
+      }
+
+      if (roomVirtualWallDrawingRef.current && roomVirtualWallDraftStartRef.current) {
+        const wallPick = ctx.scene.pick(evt.offsetX, evt.offsetY, (mesh) => !mesh.metadata?.previewTarget);
+        if (wallPick?.hit && wallPick.pickedPoint) {
+          const localEnd = worldPointToRoomLocal(
+            wallPick.pickedPoint,
+            positionRef.current,
+            roomPreviewInfoRef.current.rotation.y,
+            modelScaleRef.current,
+          );
+          roomVirtualWallDraftEndRef.current = localEnd;
+          updateRoomVirtualWallDraft(roomVirtualWallDraftStartRef.current, localEnd);
+        }
       }
 
       const roomHoverPick = editorModeRef.current === 'rooms' && !roomPanelOpenRef.current
@@ -1643,6 +1912,53 @@ export default function ConfigEditor() {
     ctx.scene.onPointerDown = (evt, pick) => {
       pointerDownPos = { x: evt.clientX, y: evt.clientY };
 
+      if (roomVirtualWallDrawingRef.current && roomPanelOpenRef.current) {
+        const wallPick = ctx.scene.pick(evt.offsetX, evt.offsetY, (mesh) => !mesh.metadata?.previewTarget);
+        if (!wallPick.hit || !wallPick.pickedPoint) return;
+        const localPoint = worldPointToRoomLocal(
+          wallPick.pickedPoint,
+          positionRef.current,
+          roomPreviewInfoRef.current.rotation.y,
+          modelScaleRef.current,
+        );
+        const start = roomVirtualWallDraftStartRef.current;
+        if (!start) {
+          roomVirtualWallDraftStartRef.current = localPoint;
+          roomVirtualWallDraftEndRef.current = localPoint;
+          setRoomVirtualWallStartSet(true);
+          updateRoomVirtualWallDraft(localPoint, localPoint);
+          showToast(t('rooms.virtualWallEnd'));
+        } else {
+          const length = Math.hypot(localPoint.x - start.x, localPoint.z - start.z);
+          if (length < 0.03) {
+            showToast(t('rooms.virtualWallTooShort'));
+            pointerDownPos = null;
+            return;
+          }
+          const wall: RoomVirtualWall = { start: { ...start }, end: localPoint };
+          const wallIndex = roomFormRef.current?.addVirtualWall(wall)
+            ?? roomPreviewInfoRef.current.virtualWalls.length;
+          const nextInfo: RoomPreviewInfo = {
+            ...roomPreviewInfoRef.current,
+            virtualWalls: [...roomPreviewInfoRef.current.virtualWalls, wall],
+          };
+          roomPreviewInfoRef.current = nextInfo;
+          roomSelectedPointRef.current = null;
+          setRoomSelectedPoint(null);
+          roomSelectedVirtualWallRef.current = wallIndex;
+          setRoomSelectedVirtualWall(wallIndex);
+          roomSelectedVirtualWallEndpointRef.current = { wallIndex, endpoint: 'end' };
+          setRoomSelectedVirtualWallEndpoint({ wallIndex, endpoint: 'end' });
+          roomGizmoActiveRef.current = true;
+          setRoomGizmoActive(true);
+          handleCancelRoomVirtualWallDrawingRef.current();
+          updateRoomPreview(positionRef.current, nextInfo);
+          showToast(t('rooms.virtualWallAdded'));
+        }
+        pointerDownPos = null;
+        return;
+      }
+
       if (placingModeRef.current) {
         // Re-pick excluding preview meshes so we hit the model surface
         const placePick = ctx.scene.pick(evt.offsetX, evt.offsetY, (m) => !m.metadata?.previewTarget);
@@ -1652,6 +1968,12 @@ export default function ConfigEditor() {
 
         if (roomPanelOpenRef.current) {
           const currentInfo = roomPreviewInfoRef.current;
+          const worldVirtualWalls = roomVirtualWallsToWorld(
+            currentInfo.virtualWalls,
+            positionRef.current,
+            currentInfo.rotation.y,
+            modelScaleRef.current,
+          );
           const trace = traceRoomPolygon(
             ctx.scene,
             placePick.pickedPoint,
@@ -1661,6 +1983,7 @@ export default function ConfigEditor() {
               modelScale: modelScaleRef.current,
               fallbackWidth: currentInfo.size.width,
               fallbackDepth: currentInfo.size.depth,
+              virtualWalls: worldVirtualWalls,
             },
           );
           const snappedFloorPosition = worldToConfigPosition(
@@ -1672,16 +1995,28 @@ export default function ConfigEditor() {
             y: snappedFloorPosition.y,
             z: snappedFloorPosition.z,
           };
+          const rebasedVirtualWalls = worldVirtualWalls.map((wall) => ({
+            start: {
+              x: roundValue(wall.start.x / modelScaleRef.current - newPos.x),
+              z: roundValue(wall.start.z / modelScaleRef.current - newPos.z),
+            },
+            end: {
+              x: roundValue(wall.end.x / modelScaleRef.current - newPos.x),
+              z: roundValue(wall.end.z / modelScaleRef.current - newPos.z),
+            },
+          }));
           const nextInfo: RoomPreviewInfo = {
             name: currentInfo.name,
             size: { ...currentInfo.size, width: trace.width, depth: trace.depth },
             rotation: { x: 0, y: 0, z: 0 },
             points: trace.points,
+            virtualWalls: rebasedVirtualWalls,
           };
           setPosition(newPos);
           positionRef.current = newPos;
           roomPreviewInfoRef.current = nextInfo;
           roomFormRef.current?.applyDetectedPolygon(trace.points);
+          roomFormRef.current?.setVirtualWalls(rebasedVirtualWalls);
           setRoomZoneReady(true);
           roomZoneReadyRef.current = true;
           setRoomPointCount(trace.points.length);
@@ -1795,14 +2130,29 @@ export default function ConfigEditor() {
           const pointIndex = metadata.roomEditorTarget === 'point'
             ? Number(metadata.roomPointIndex)
             : null;
-          if (pointIndex !== null) {
+          const wallIndex = metadata.roomEditorTarget === 'virtualWall'
+            || metadata.roomEditorTarget === 'virtualWallEndpoint'
+            ? Number(metadata.roomVirtualWallIndex)
+            : null;
+          const wallEndpoint: RoomVirtualWallEndpoint | null = metadata.roomEditorTarget === 'virtualWallEndpoint'
+            ? {
+              wallIndex: Number(metadata.roomVirtualWallIndex),
+              endpoint: metadata.roomVirtualWallEndpoint === 'end' ? 'end' : 'start',
+            }
+            : null;
+          if (pointIndex !== null || wallEndpoint) {
             transformModeRef.current = 'move';
             setTransformMode('move');
           }
           roomSelectedPointRef.current = pointIndex;
           setRoomSelectedPoint(pointIndex);
-          roomGizmoActiveRef.current = true;
-          setRoomGizmoActive(true);
+          roomSelectedVirtualWallRef.current = wallIndex;
+          setRoomSelectedVirtualWall(wallIndex);
+          roomSelectedVirtualWallEndpointRef.current = wallEndpoint;
+          setRoomSelectedVirtualWallEndpoint(wallEndpoint);
+          const activateGizmo = metadata.roomEditorTarget !== 'virtualWall';
+          roomGizmoActiveRef.current = activateGizmo;
+          setRoomGizmoActive(activateGizmo);
           updateRoomPreview(positionRef.current, roomPreviewInfoRef.current);
         }
         return;
@@ -2029,6 +2379,11 @@ export default function ConfigEditor() {
         return;
       }
       if (e.key === 'Escape') {
+        if (roomVirtualWallDrawingRef.current) {
+          e.preventDefault();
+          handleCancelRoomVirtualWallDrawingRef.current();
+          return;
+        }
         if (panelOpenRef.current) {
           e.preventDefault();
           handleClosePanelRef.current();
@@ -3064,6 +3419,7 @@ export default function ConfigEditor() {
       size: { width: editorDefaultSizes.wall.width, height: 0.025, depth: editorDefaultSizes.wall.depth },
       rotation: { x: 0, y: 0, z: 0 },
       points: initialPoints,
+      virtualWalls: [],
     };
     setRoomEditIdx(null);
     setRoomDraft(draft);
@@ -3071,6 +3427,10 @@ export default function ConfigEditor() {
     roomZoneReadyRef.current = false;
     setRoomSelectedPoint(null);
     roomSelectedPointRef.current = null;
+    setRoomSelectedVirtualWall(null);
+    roomSelectedVirtualWallRef.current = null;
+    setRoomSelectedVirtualWallEndpoint(null);
+    roomSelectedVirtualWallEndpointRef.current = null;
     setRoomPointCount(0);
     setRoomGizmoActive(false);
     roomGizmoActiveRef.current = false;
@@ -3093,19 +3453,34 @@ export default function ConfigEditor() {
       rotation: { x: 0, y: room.zone.rotationY ?? 0, z: 0 },
       points: room.zone.points?.map((point) => ({ ...point }))
         ?? rectangleRoomZonePoints(room.zone.width, room.zone.depth),
+      virtualWalls: room.zone.virtualWalls?.map((wall) => ({
+        start: { ...wall.start },
+        end: { ...wall.end },
+      })) ?? [],
     };
     setRoomEditIdx(idx);
     setRoomDraft({
       ...room,
       haAreaIds: [...room.haAreaIds],
       anchor: { ...room.anchor },
-      zone: { ...room.zone },
+      zone: {
+        ...room.zone,
+        points: room.zone.points?.map((point) => ({ ...point })),
+        virtualWalls: room.zone.virtualWalls?.map((wall) => ({
+          start: { ...wall.start },
+          end: { ...wall.end },
+        })),
+      },
       primaryEntityIds: [...room.primaryEntityIds],
     });
     setRoomZoneReady(true);
     roomZoneReadyRef.current = true;
     setRoomSelectedPoint(null);
     roomSelectedPointRef.current = null;
+    setRoomSelectedVirtualWall(null);
+    roomSelectedVirtualWallRef.current = null;
+    setRoomSelectedVirtualWallEndpoint(null);
+    roomSelectedVirtualWallEndpointRef.current = null;
     setRoomPointCount(room.zone.points?.length ?? 4);
     setRoomGizmoActive(false);
     roomGizmoActiveRef.current = false;
@@ -3128,6 +3503,7 @@ export default function ConfigEditor() {
   }, [rooms, showToast, t]);
 
   const handleCloseRoomPanel = useCallback(() => {
+    handleCancelRoomVirtualWallDrawingRef.current();
     setRoomPanelOpen(false);
     setRoomEditIdx(null);
     setRoomDraft(null);
@@ -3135,6 +3511,10 @@ export default function ConfigEditor() {
     roomZoneReadyRef.current = false;
     setRoomSelectedPoint(null);
     roomSelectedPointRef.current = null;
+    setRoomSelectedVirtualWall(null);
+    roomSelectedVirtualWallRef.current = null;
+    setRoomSelectedVirtualWallEndpoint(null);
+    roomSelectedVirtualWallEndpointRef.current = null;
     setRoomGizmoActive(false);
     roomGizmoActiveRef.current = false;
     clearPreview();
@@ -3154,6 +3534,10 @@ export default function ConfigEditor() {
     setTransformMode('move');
     roomSelectedPointRef.current = null;
     setRoomSelectedPoint(null);
+    roomSelectedVirtualWallRef.current = null;
+    setRoomSelectedVirtualWall(null);
+    roomSelectedVirtualWallEndpointRef.current = null;
+    setRoomSelectedVirtualWallEndpoint(null);
     roomGizmoActiveRef.current = true;
     setRoomGizmoActive(true);
     updateRoomPreview(positionRef.current, roomPreviewInfoRef.current);
@@ -3166,6 +3550,10 @@ export default function ConfigEditor() {
     setTransformMode('move');
     roomSelectedPointRef.current = pointIndex;
     setRoomSelectedPoint(pointIndex);
+    roomSelectedVirtualWallRef.current = null;
+    setRoomSelectedVirtualWall(null);
+    roomSelectedVirtualWallEndpointRef.current = null;
+    setRoomSelectedVirtualWallEndpoint(null);
     roomGizmoActiveRef.current = true;
     setRoomGizmoActive(true);
   }, []);
@@ -3183,9 +3571,60 @@ export default function ConfigEditor() {
     roomFormRef.current?.resetPoints();
     roomSelectedPointRef.current = null;
     setRoomSelectedPoint(null);
+    roomSelectedVirtualWallRef.current = null;
+    setRoomSelectedVirtualWall(null);
+    roomSelectedVirtualWallEndpointRef.current = null;
+    setRoomSelectedVirtualWallEndpoint(null);
     roomGizmoActiveRef.current = false;
     setRoomGizmoActive(false);
   }, []);
+
+  const handleToggleRoomVirtualWallDrawing = useCallback(() => {
+    if (roomVirtualWallDrawingRef.current) {
+      cancelRoomVirtualWallDrawing();
+      return;
+    }
+    exitPlacingMode();
+    roomVirtualWallDrawingRef.current = true;
+    roomVirtualWallDraftStartRef.current = null;
+    roomVirtualWallDraftEndRef.current = null;
+    setRoomVirtualWallDrawing(true);
+    setRoomVirtualWallStartSet(false);
+    roomSelectedPointRef.current = null;
+    setRoomSelectedPoint(null);
+    roomSelectedVirtualWallRef.current = null;
+    setRoomSelectedVirtualWall(null);
+    roomSelectedVirtualWallEndpointRef.current = null;
+    setRoomSelectedVirtualWallEndpoint(null);
+    roomGizmoActiveRef.current = false;
+    setRoomGizmoActive(false);
+    updateRoomPreview(positionRef.current, roomPreviewInfoRef.current);
+    const ctx = sceneCtxRef.current;
+    if (ctx) {
+      ctx.camera.inputs.removeByType('ArcRotateCameraPointersInput');
+      if (canvasRef.current) canvasRef.current.style.cursor = 'crosshair';
+    }
+    showToast(t('rooms.virtualWallStart'));
+  }, [cancelRoomVirtualWallDrawing, exitPlacingMode, showToast, t, updateRoomPreview]);
+
+  const handleRemoveRoomVirtualWall = useCallback(() => {
+    const wallIndex = roomSelectedVirtualWallRef.current;
+    if (wallIndex === null || !roomPreviewInfoRef.current.virtualWalls[wallIndex]) return;
+    roomFormRef.current?.removeVirtualWall(wallIndex);
+    const nextInfo: RoomPreviewInfo = {
+      ...roomPreviewInfoRef.current,
+      virtualWalls: roomPreviewInfoRef.current.virtualWalls.filter((_, index) => index !== wallIndex),
+    };
+    roomPreviewInfoRef.current = nextInfo;
+    roomSelectedVirtualWallRef.current = null;
+    setRoomSelectedVirtualWall(null);
+    roomSelectedVirtualWallEndpointRef.current = null;
+    setRoomSelectedVirtualWallEndpoint(null);
+    roomGizmoActiveRef.current = false;
+    setRoomGizmoActive(false);
+    updateRoomPreview(positionRef.current, nextInfo);
+    showToast(t('rooms.virtualWallRemoved'));
+  }, [showToast, t, updateRoomPreview]);
 
   const handleSaveRoom = useCallback(async (room: RoomConfig) => {
     const updated = roomEditIdx === null
@@ -3203,7 +3642,7 @@ export default function ConfigEditor() {
     if (draggingGizmoRef.current) return;
     const info = roomPreviewInfoRef.current;
     updateRoomPreview(position, info);
-  }, [position, roomGizmoActive, roomPanelOpen, roomSelectedPoint, roomZoneReady, updateRoomPreview]);
+  }, [position, roomGizmoActive, roomPanelOpen, roomSelectedPoint, roomSelectedVirtualWall, roomSelectedVirtualWallEndpoint, roomZoneReady, transformMode, updateRoomPreview]);
 
   // ── Tube handlers ──────────────────────────────────────────────
 
@@ -3794,8 +4233,10 @@ export default function ConfigEditor() {
       {/* 3D Canvas */}
       <div className={`canvas-area editor-canvas${panelOpen || displayPanelOpen || blindPanelOpen || wallPanelOpen || smartDevicePanelOpen || tubePanelOpen || roomPanelOpen ? ' form-open' : ''}`}>
         <canvas ref={canvasRef} />
-        <div className={`mode-banner${placingMode ? ' visible' : ''}`}>
-          {displayPanelOpen ? t('editor.placeDisplayBanner') : blindPanelOpen ? t('editor.placeBlindBanner') : wallPanelOpen ? t('editor.placeWallBanner') : smartDevicePanelOpen ? t('editor.placeSmartDeviceBanner') : roomPanelOpen ? t('editor.placeRoomBanner') : t('editor.placeLightBanner')}
+        <div className={`mode-banner${placingMode || roomVirtualWallDrawing ? ' visible' : ''}`}>
+          {roomVirtualWallDrawing
+            ? t(roomVirtualWallStartSet ? 'rooms.virtualWallEnd' : 'rooms.virtualWallStart')
+            : displayPanelOpen ? t('editor.placeDisplayBanner') : blindPanelOpen ? t('editor.placeBlindBanner') : wallPanelOpen ? t('editor.placeWallBanner') : smartDevicePanelOpen ? t('editor.placeSmartDeviceBanner') : roomPanelOpen ? t('editor.placeRoomBanner') : t('editor.placeLightBanner')}
         </div>
         {(!roomPanelOpen || roomZoneReady) && (
           <div className="editor-view-toolbar editor-transform-toolbar" role="toolbar" aria-label={t('editor.transformTools')}>
@@ -3819,10 +4260,10 @@ export default function ConfigEditor() {
         {roomPanelOpen && roomZoneReady && (
           <div className="editor-view-toolbar editor-room-toolbar" role="toolbar" aria-label={t('rooms.pointTools')}>
             <button
-              className={`editor-view-tool-btn${roomGizmoActive && roomSelectedPoint === null ? ' active' : ''}`}
+              className={`editor-view-tool-btn${roomGizmoActive && roomSelectedPoint === null && roomSelectedVirtualWallEndpoint === null ? ' active' : ''}`}
               onClick={handleSelectRoomCentre}
               aria-label={t('rooms.selectCentre')}
-              aria-pressed={roomGizmoActive && roomSelectedPoint === null}
+              aria-pressed={roomGizmoActive && roomSelectedPoint === null && roomSelectedVirtualWallEndpoint === null}
               title={t('rooms.selectCentre')}
             >
               <MapPin size={16} strokeWidth={1.8} aria-hidden="true" />
@@ -3851,6 +4292,24 @@ export default function ConfigEditor() {
               title={t('rooms.resetRectangle')}
             >
               <Square size={15} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+            <button
+              className={`editor-view-tool-btn${roomVirtualWallDrawing ? ' active' : ''}`}
+              onClick={handleToggleRoomVirtualWallDrawing}
+              aria-label={t(roomVirtualWallDrawing ? 'rooms.cancelVirtualWall' : 'rooms.drawVirtualWall')}
+              aria-pressed={roomVirtualWallDrawing}
+              title={t(roomVirtualWallDrawing ? 'rooms.cancelVirtualWall' : 'rooms.drawVirtualWall')}
+            >
+              <Minus size={17} strokeWidth={2.2} aria-hidden="true" />
+            </button>
+            <button
+              className="editor-view-tool-btn"
+              onClick={handleRemoveRoomVirtualWall}
+              disabled={roomSelectedVirtualWall === null}
+              aria-label={t('rooms.removeVirtualWall')}
+              title={t('rooms.removeVirtualWall')}
+            >
+              <Eraser size={15} strokeWidth={1.8} aria-hidden="true" />
             </button>
             <span className="editor-room-point-count" aria-label={t('rooms.pointsCount', { count: roomPointCount })}>
               {roomPointCount}

@@ -1,5 +1,5 @@
 import { Ray, Vector3, VertexBuffer, type AbstractMesh, type PickingInfo, type Scene } from '@babylonjs/core';
-import type { RoomZonePoint } from '../types';
+import type { RoomVirtualWall, RoomZonePoint } from '../types';
 
 export interface RoomPolygonTraceResult {
   points: RoomZonePoint[];
@@ -16,6 +16,8 @@ interface TraceOptions {
   fallbackWidth: number;
   fallbackDepth: number;
   rayCount?: number;
+  /** Virtual wall segments in world-space X/Z coordinates. */
+  virtualWalls?: RoomVirtualWall[];
 }
 
 interface Point2 {
@@ -68,6 +70,99 @@ function distanceToSegment(point: Point2, start: Point2, end: Point2): number {
   if (lengthSquared <= 1e-10) return Math.hypot(point.x - start.x, point.z - start.z);
   const t = clamp(((point.x - start.x) * dx + (point.z - start.z) * dz) / lengthSquared, 0, 1);
   return Math.hypot(point.x - (start.x + t * dx), point.z - (start.z + t * dz));
+}
+
+function cross2(a: Point2, b: Point2): number {
+  return a.x * b.z - a.z * b.x;
+}
+
+function raySegmentDistance(
+  origin: Point2,
+  direction: Point2,
+  start: Point2,
+  end: Point2,
+  minimumDistance = 0,
+): number | null {
+  const segment = { x: end.x - start.x, z: end.z - start.z };
+  const denominator = cross2(direction, segment);
+  if (Math.abs(denominator) <= 1e-9) return null;
+  const offset = { x: start.x - origin.x, z: start.z - origin.z };
+  const distance = cross2(offset, segment) / denominator;
+  const segmentRatio = cross2(offset, direction) / denominator;
+  if (distance < minimumDistance || segmentRatio < -1e-6 || segmentRatio > 1 + 1e-6) return null;
+  return distance;
+}
+
+function closestSegmentDistance(
+  origin: Point2,
+  direction: Point2,
+  segments: RoomVirtualWall[],
+  minimumDistance = 0,
+): number | null {
+  let closest: number | null = null;
+  for (const segment of segments) {
+    const distance = raySegmentDistance(origin, direction, segment.start, segment.end, minimumDistance);
+    if (distance !== null && (closest === null || distance < closest)) closest = distance;
+  }
+  return closest;
+}
+
+function polygonRayDistance(origin: Point2, direction: Point2, polygon: Point2[]): number | null {
+  let closest: number | null = null;
+  for (let index = 0; index < polygon.length; index++) {
+    const distance = raySegmentDistance(origin, direction, polygon[index], polygon[(index + 1) % polygon.length]);
+    if (distance !== null && (closest === null || distance < closest)) closest = distance;
+  }
+  return closest;
+}
+
+function applyVirtualWallsToFloorBoundary(
+  boundary: Point2[],
+  origin: Point2,
+  virtualWalls: RoomVirtualWall[],
+  diagonal: number,
+): Point2[] | null {
+  const usableWalls = virtualWalls.filter((wall) =>
+    Math.hypot(wall.end.x - wall.start.x, wall.end.z - wall.start.z) >= diagonal * 0.002);
+  if (!usableWalls.length) return boundary;
+
+  const angles = new Set<number>();
+  const addAngle = (angle: number) => {
+    const normalized = (angle + Math.PI * 2) % (Math.PI * 2);
+    angles.add(parseFloat(normalized.toFixed(7)));
+  };
+  for (let index = 0; index < 96; index++) addAngle((index / 96) * Math.PI * 2);
+  for (const point of [...boundary, ...usableWalls.flatMap((wall) => [wall.start, wall.end])]) {
+    const angle = Math.atan2(point.z - origin.z, point.x - origin.x);
+    addAngle(angle - 0.00001);
+    addAngle(angle);
+    addAngle(angle + 0.00001);
+  }
+
+  const inset = diagonal * 0.0008;
+  const sampled = [...angles]
+    .sort((a, b) => a - b)
+    .map((angle) => {
+      const direction = { x: Math.cos(angle), z: Math.sin(angle) };
+      const floorDistance = polygonRayDistance(origin, direction, boundary);
+      if (floorDistance === null) return null;
+      const wallDistance = closestSegmentDistance(origin, direction, usableWalls, diagonal * 0.001);
+      const distance = Math.max(0, Math.min(floorDistance, wallDistance ?? floorDistance) - inset);
+      return {
+        x: origin.x + direction.x * distance,
+        z: origin.z + direction.z * distance,
+      };
+    })
+    .filter((point): point is Point2 => point !== null);
+  if (sampled.length < 3) return null;
+
+  let tolerance = diagonal * 0.0015;
+  let simplified = simplifyClosed(sampled, tolerance);
+  while (simplified.length > 20) {
+    tolerance *= 1.35;
+    simplified = simplifyClosed(sampled, tolerance);
+  }
+  return simplified.length >= 3 ? simplified : null;
 }
 
 function simplifyOpen(points: Point2[], tolerance: number): Point2[] {
@@ -439,6 +534,7 @@ function traceFloorMeshBoundary(
   floorY: number,
   diagonal: number,
   scale: number,
+  virtualWalls: RoomVirtualWall[],
 ): RoomPolygonTraceResult | null {
   const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
   const indices = mesh.getIndices();
@@ -494,7 +590,13 @@ function traceFloorMeshBoundary(
     .sort((a, b) => Math.abs(polygonArea(a)) - Math.abs(polygonArea(b)));
   if (!containingLoops.length) return null;
 
-  let worldPoints = containingLoops[0];
+  let worldPoints = applyVirtualWallsToFloorBoundary(
+    containingLoops[0],
+    clicked2,
+    virtualWalls,
+    diagonal,
+  );
+  if (!worldPoints) return null;
   let tolerance = diagonal * 0.0015;
   worldPoints = simplifyClosed(worldPoints, tolerance);
   while (worldPoints.length > 16) {
@@ -610,7 +712,14 @@ export function traceRoomPolygon(
   const floorSurface = findFloorSurface(scene, floorPoint, modelMeshes, modelMeshSet, diagonal);
   const floorY = floorSurface.y;
   const floorBoundary = floorSurface.mesh
-    ? traceFloorMeshBoundary(floorSurface.mesh, floorPoint, floorY, diagonal, scale)
+    ? traceFloorMeshBoundary(
+      floorSurface.mesh,
+      floorPoint,
+      floorY,
+      diagonal,
+      scale,
+      options.virtualWalls ?? [],
+    )
     : null;
   if (floorBoundary) return floorBoundary;
   const bounds = modelBounds(modelMeshes);
@@ -642,7 +751,13 @@ export function traceRoomPolygon(
   const smoothed = smoothDistances(filled);
   let worldPoints: Point2[] = smoothed.map((distance, index) => {
     const angle = (index / rayCount) * Math.PI * 2;
-    const safeDistance = Math.max(minimumDistance, distance - inset);
+    const virtualDistance = closestSegmentDistance(
+      { x: rayOrigin.x, z: rayOrigin.z },
+      { x: Math.cos(angle), z: Math.sin(angle) },
+      options.virtualWalls ?? [],
+      minimumDistance,
+    );
+    const safeDistance = Math.max(minimumDistance, Math.min(distance, virtualDistance ?? distance) - inset);
     return {
       x: Math.cos(angle) * safeDistance,
       z: Math.sin(angle) * safeDistance,

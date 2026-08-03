@@ -87,6 +87,10 @@ entsprechenden Editor-Funktionen gesetzt.
   an ihrer Bodenmaterialgrenze. Für Modelle ohne getrennte Bodenflächen bleibt die
   Erkennung über hohe, vertikale und über fünf Messhöhen konsistente Wandtreffer als
   Fallback erhalten; niedrige oder kompakte Möbel werden dabei weitgehend ignoriert.
+- Für offene Übergänge lassen sich direkt im 3D-Modell virtuelle Begrenzungswände als
+  Linie mit Start- und Endpunkt zeichnen. Ihre Endpunkte können einzeln verschoben und
+  die komplette Linie kann ausgewählt oder gelöscht werden. Eine erneute Raumerkennung
+  behandelt diese endlichen Segmente wie Wände; sie werden dauerhaft pro Raum gespeichert.
 - Solange keine Kontur erkannt wurde, bleiben Transformationswerkzeuge und Speichern
   ausgeblendet beziehungsweise deaktiviert. Erst die anschließende Feinbearbeitung
   blendet kleine Eckpunktgriffe ein; das Gizmo erscheint nur für den gewählten Griff.

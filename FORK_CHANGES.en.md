@@ -87,6 +87,10 @@ are used.
   Models without separate floor surfaces retain the fallback based on tall, vertical
   wall hits that remain consistent across five probe heights, largely ignoring low or
   compact furniture.
+- Open transitions can be bounded directly in the 3D model with virtual walls drawn as
+  finite start-to-end lines. Each endpoint can be moved independently, while the whole
+  line can be selected or deleted. Re-running room detection treats these segments as
+  walls, and they are persisted separately for each room.
 - Until an outline has been detected, transform tools and saving remain hidden or
   disabled. Fine editing then shows small corner handles, while the gizmo appears only
   for the selected handle.
