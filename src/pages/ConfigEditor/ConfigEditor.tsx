@@ -1651,7 +1651,6 @@ export default function ConfigEditor() {
         const p = worldToConfigPosition(placePick.pickedPoint, modelScaleRef.current);
 
         if (roomPanelOpenRef.current) {
-          const newPos: LightPosition = { x: p.x, y: p.y, z: p.z };
           const currentInfo = roomPreviewInfoRef.current;
           const trace = traceRoomPolygon(
             ctx.scene,
@@ -1664,6 +1663,15 @@ export default function ConfigEditor() {
               fallbackDepth: currentInfo.size.depth,
             },
           );
+          const snappedFloorPosition = worldToConfigPosition(
+            new Vector3(placePick.pickedPoint.x, trace.floorY, placePick.pickedPoint.z),
+            modelScaleRef.current,
+          );
+          const newPos: LightPosition = {
+            x: snappedFloorPosition.x,
+            y: snappedFloorPosition.y,
+            z: snappedFloorPosition.z,
+          };
           const nextInfo: RoomPreviewInfo = {
             name: currentInfo.name,
             size: { ...currentInfo.size, width: trace.width, depth: trace.depth },

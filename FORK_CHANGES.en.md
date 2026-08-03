@@ -80,9 +80,10 @@ are used.
 - Room areas can be stored as rectangles or free-form polygons, including concave
   outlines. Corner points can be selected, moved, added, and removed directly in the
   3D view, and a reset action restores a rectangle.
-- New rooms start without a pre-rendered area. Clicking a clear floor spot probes the
-  surrounding model geometry at several heights, avoiding many low furniture hits,
-  and creates a simplified room outline ready for editing.
+- New rooms start without a pre-rendered area. A click on a clear floor spot is first
+  projected onto a broad horizontal floor surface. The boundary then uses only tall,
+  vertical wall hits that remain consistent across five probe heights, largely
+  ignoring low or compact furniture.
 - Until an outline has been detected, transform tools and saving remain hidden or
   disabled. Fine editing then shows small corner handles, while the gizmo appears only
   for the selected handle.

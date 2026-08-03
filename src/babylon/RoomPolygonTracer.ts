@@ -1,10 +1,11 @@
-import { Ray, Vector3, type AbstractMesh, type Scene } from '@babylonjs/core';
+import { Ray, Vector3, type AbstractMesh, type PickingInfo, type Scene } from '@babylonjs/core';
 import type { RoomZonePoint } from '../types';
 
 export interface RoomPolygonTraceResult {
   points: RoomZonePoint[];
   width: number;
   depth: number;
+  floorY: number;
   confidence: number;
   usedFallback: boolean;
 }
@@ -20,6 +21,29 @@ interface TraceOptions {
 interface Point2 {
   x: number;
   z: number;
+}
+
+interface ModelBounds {
+  min: Vector3;
+  max: Vector3;
+}
+
+interface FloorCandidate {
+  y: number;
+  surfaceBonus: number;
+}
+
+interface WallHit {
+  distance: number;
+  heightIndex: number;
+  wallLike: boolean;
+}
+
+interface DistanceCluster {
+  distanceSum: number;
+  count: number;
+  heightIndexes: Set<number>;
+  wallHeightIndexes: Set<number>;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -138,20 +162,251 @@ function dimensions(points: RoomZonePoint[]): { width: number; depth: number } {
   };
 }
 
-function fallbackResult(width: number, depth: number): RoomPolygonTraceResult {
+function fallbackResult(width: number, depth: number, floorY: number): RoomPolygonTraceResult {
   const points = [
     { x: -width / 2, z: -depth / 2 },
     { x: width / 2, z: -depth / 2 },
     { x: width / 2, z: depth / 2 },
     { x: -width / 2, z: depth / 2 },
   ].map(roundPoint);
-  return { points, width, depth, confidence: 0, usedFallback: true };
+  return { points, width, depth, floorY, confidence: 0, usedFallback: true };
+}
+
+function modelBounds(meshes: AbstractMesh[]): ModelBounds {
+  let min = new Vector3(Infinity, Infinity, Infinity);
+  let max = new Vector3(-Infinity, -Infinity, -Infinity);
+  for (const mesh of meshes) {
+    try {
+      const box = mesh.getBoundingInfo().boundingBox;
+      min = Vector3.Minimize(min, box.minimumWorld);
+      max = Vector3.Maximize(max, box.maximumWorld);
+    } catch {
+      // Imported helper meshes may not expose stable bounds.
+    }
+  }
+  if (!Number.isFinite(min.x) || !Number.isFinite(max.x)) {
+    return { min: Vector3.Zero(), max: Vector3.Zero() };
+  }
+  return { min, max };
+}
+
+function pickNormalY(pick: PickingInfo): number | null {
+  try {
+    const normal = pick.getNormal(true, true);
+    return normal ? Math.abs(normal.y) : null;
+  } catch {
+    return null;
+  }
+}
+
+function meshName(mesh: AbstractMesh): string {
+  const metadata = mesh.metadata as Record<string, unknown> | null;
+  return `${mesh.name} ${String(metadata?.modelObjectLabel ?? '')}`.toLowerCase();
+}
+
+function horizontalFootprintBonus(mesh: AbstractMesh, diagonal: number): number {
+  try {
+    const box = mesh.getBoundingInfo().boundingBox;
+    const size = box.maximumWorld.subtract(box.minimumWorld);
+    const longSide = Math.max(size.x, size.z);
+    const shortSide = Math.min(size.x, size.z);
+    const name = meshName(mesh);
+    if (/floor|ground|boden|decke|ceiling/.test(name)) return 0.3;
+    if (longSide >= diagonal * 0.16 && shortSide >= diagonal * 0.07) return 0.2;
+    if (longSide >= diagonal * 0.1 && shortSide >= diagonal * 0.035) return 0.1;
+  } catch {
+    // No footprint bonus when imported bounds cannot be read.
+  }
+  return 0;
+}
+
+function likelyWallMesh(mesh: AbstractMesh, floorY: number, wallHeight: number, diagonal: number): boolean {
+  const name = meshName(mesh);
+  if (/wall|wand|mur|cloison/.test(name)) return true;
+  if (/chair|stuhl|table|tisch|bed|bett|sofa|couch|cabinet|schrank|shelf|regal/.test(name)) return false;
+  try {
+    const box = mesh.getBoundingInfo().boundingBox;
+    const size = box.maximumWorld.subtract(box.minimumWorld);
+    const horizontalLong = Math.max(size.x, size.z);
+    const horizontalShort = Math.min(size.x, size.z);
+    const reachesUpperWall = box.maximumWorld.y >= floorY + wallHeight * 0.68;
+    const isTall = size.y >= wallHeight * 0.52;
+    const isThin = horizontalShort <= Math.max(diagonal * 0.018, horizontalLong * 0.22);
+    return reachesUpperWall && isTall && isThin && horizontalLong >= diagonal * 0.025;
+  } catch {
+    return false;
+  }
+}
+
+function modelPicks(scene: Scene, ray: Ray, modelMeshSet: Set<AbstractMesh>): PickingInfo[] {
+  return (scene.multiPickWithRay(
+    ray,
+    (mesh) => modelMeshSet.has(mesh) && mesh.isEnabled() && mesh.isVisible,
+  ) ?? []).filter((pick) => pick.hit && Boolean(pick.pickedPoint));
+}
+
+function mergeFloorCandidate(candidates: FloorCandidate[], candidate: FloorCandidate, tolerance: number): void {
+  const existing = candidates.find((entry) => Math.abs(entry.y - candidate.y) <= tolerance);
+  if (existing) {
+    existing.y = (existing.y + candidate.y) / 2;
+    existing.surfaceBonus = Math.max(existing.surfaceBonus, candidate.surfaceBonus);
+    return;
+  }
+  candidates.push(candidate);
+}
+
+function floorSurfaceSupport(
+  scene: Scene,
+  x: number,
+  z: number,
+  candidateY: number,
+  modelMeshSet: Set<AbstractMesh>,
+  diagonal: number,
+): number {
+  const offsets: Point2[] = [{ x: 0, z: 0 }];
+  for (const radius of [diagonal * 0.012, diagonal * 0.028]) {
+    for (let index = 0; index < 8; index++) {
+      const angle = (index / 8) * Math.PI * 2;
+      offsets.push({ x: Math.cos(angle) * radius, z: Math.sin(angle) * radius });
+    }
+  }
+  const tolerance = diagonal * 0.004;
+  let supported = 0;
+  for (const offset of offsets) {
+    const ray = new Ray(
+      new Vector3(x + offset.x, candidateY + diagonal * 0.018, z + offset.z),
+      Vector3.Down(),
+      diagonal * 0.045,
+    );
+    const hasSurface = modelPicks(scene, ray, modelMeshSet).some((pick) => {
+      const point = pick.pickedPoint;
+      const normalY = pickNormalY(pick);
+      return Boolean(point) && Math.abs(point!.y - candidateY) <= tolerance && (normalY === null || normalY >= 0.68);
+    });
+    if (hasSurface) supported++;
+  }
+  return supported / offsets.length;
+}
+
+function findFloorY(
+  scene: Scene,
+  clickedPoint: Vector3,
+  modelMeshes: AbstractMesh[],
+  modelMeshSet: Set<AbstractMesh>,
+  diagonal: number,
+): number {
+  const bounds = modelBounds(modelMeshes);
+  const verticalSpan = Math.max(diagonal * 0.03, bounds.max.y - bounds.min.y);
+  const maxDrop = clamp(verticalSpan * 0.65, diagonal * 0.035, diagonal * 0.14);
+  const tolerance = diagonal * 0.003;
+  const candidates: FloorCandidate[] = [{ y: clickedPoint.y, surfaceBonus: 0 }];
+  const ray = new Ray(
+    new Vector3(clickedPoint.x, bounds.max.y + diagonal * 0.02, clickedPoint.z),
+    Vector3.Down(),
+    verticalSpan + diagonal * 0.08,
+  );
+
+  for (const pick of modelPicks(scene, ray, modelMeshSet)) {
+    const point = pick.pickedPoint;
+    const mesh = pick.pickedMesh;
+    const normalY = pickNormalY(pick);
+    if (!point || !mesh || (normalY !== null && normalY < 0.68)) continue;
+    if (point.y > clickedPoint.y + tolerance || point.y < clickedPoint.y - maxDrop) continue;
+    mergeFloorCandidate(candidates, {
+      y: point.y,
+      surfaceBonus: horizontalFootprintBonus(mesh, diagonal),
+    }, tolerance);
+  }
+
+  let bestY = clickedPoint.y;
+  let bestScore = -Infinity;
+  for (const candidate of candidates) {
+    const support = floorSurfaceSupport(
+      scene,
+      clickedPoint.x,
+      clickedPoint.z,
+      candidate.y,
+      modelMeshSet,
+      diagonal,
+    );
+    const dropPenalty = Math.abs(clickedPoint.y - candidate.y) / Math.max(maxDrop, 1e-6) * 0.08;
+    const score = support + candidate.surfaceBonus - dropPenalty;
+    if (score > bestScore) {
+      bestScore = score;
+      bestY = candidate.y;
+    }
+  }
+  return bestY;
+}
+
+function clusterWallHits(hits: WallHit[], tolerance: number): DistanceCluster[] {
+  const clusters: DistanceCluster[] = [];
+  for (const hit of [...hits].sort((a, b) => a.distance - b.distance)) {
+    const cluster = clusters.find((candidate) =>
+      Math.abs(candidate.distanceSum / candidate.count - hit.distance) <= tolerance);
+    if (cluster) {
+      cluster.distanceSum += hit.distance;
+      cluster.count++;
+      cluster.heightIndexes.add(hit.heightIndex);
+      if (hit.wallLike) cluster.wallHeightIndexes.add(hit.heightIndex);
+    } else {
+      clusters.push({
+        distanceSum: hit.distance,
+        count: 1,
+        heightIndexes: new Set([hit.heightIndex]),
+        wallHeightIndexes: new Set(hit.wallLike ? [hit.heightIndex] : []),
+      });
+    }
+  }
+  return clusters;
+}
+
+function wallDistance(
+  scene: Scene,
+  origin: Vector3,
+  direction: Vector3,
+  probeHeights: number[],
+  modelMeshSet: Set<AbstractMesh>,
+  wallHeight: number,
+  diagonal: number,
+  minimumDistance: number,
+  maxDistance: number,
+): number | null {
+  const hits: WallHit[] = [];
+  probeHeights.forEach((height, heightIndex) => {
+    const ray = new Ray(new Vector3(origin.x, origin.y + height, origin.z), direction, maxDistance);
+    for (const pick of modelPicks(scene, ray, modelMeshSet)) {
+      if (!pick.pickedMesh || pick.distance <= minimumDistance || pick.distance > maxDistance) continue;
+      const normalY = pickNormalY(pick);
+      if (normalY !== null && normalY > 0.58) continue;
+      hits.push({
+        distance: pick.distance,
+        heightIndex,
+        wallLike: likelyWallMesh(pick.pickedMesh, origin.y, wallHeight, diagonal),
+      });
+    }
+  });
+  if (!hits.length) return null;
+
+  const clusters = clusterWallHits(hits, diagonal * 0.012);
+  const minimumSupport = Math.max(2, Math.ceil(probeHeights.length * 0.6));
+  const wallClusters = clusters.filter((cluster) => cluster.wallHeightIndexes.size >= minimumSupport);
+  if (wallClusters.length) {
+    return Math.min(...wallClusters.map((cluster) => cluster.distanceSum / cluster.count));
+  }
+
+  const consistent = clusters.filter((cluster) => cluster.heightIndexes.size >= minimumSupport);
+  if (!consistent.length) return null;
+  const bestSupport = Math.max(...consistent.map((cluster) => cluster.heightIndexes.size));
+  return Math.min(...consistent
+    .filter((cluster) => cluster.heightIndexes.size >= bestSupport - 1)
+    .map((cluster) => cluster.distanceSum / cluster.count));
 }
 
 /**
- * Approximates the room boundary around a clicked floor point with horizontal rays.
- * Multiple probe heights reduce false stops on low furniture; the resulting radial
- * contour is smoothed and reduced to a small editable polygon.
+ * Projects the click onto a broad horizontal floor and then approximates the room
+ * boundary with horizontal rays. Wall candidates must be vertically consistent at
+ * several heights, which filters most furniture before the contour is simplified.
  */
 export function traceRoomPolygon(
   scene: Scene,
@@ -165,36 +420,34 @@ export function traceRoomPolygon(
   const maxDistance = diagonal * 0.42;
   const minimumDistance = diagonal * 0.006;
   const inset = diagonal * 0.0025;
-  const probeHeights = [0.028, 0.065, 0.11].map((ratio) =>
-    clamp(diagonal * ratio, diagonal * 0.012, diagonal * 0.15));
   const modelMeshSet = new Set(modelMeshes);
+  const floorY = findFloorY(scene, floorPoint, modelMeshes, modelMeshSet, diagonal);
+  const bounds = modelBounds(modelMeshes);
+  const wallHeight = clamp(bounds.max.y - floorY, diagonal * 0.06, diagonal * 0.24);
+  const probeHeights = [0.3, 0.44, 0.58, 0.72, 0.86].map((ratio) =>
+    clamp(wallHeight * ratio, diagonal * 0.018, diagonal * 0.22));
+  const rayOrigin = new Vector3(floorPoint.x, floorY, floorPoint.z);
   const rawDistances: Array<number | null> = [];
 
   for (let index = 0; index < rayCount; index++) {
     const angle = (index / rayCount) * Math.PI * 2;
     const direction = new Vector3(Math.cos(angle), 0, Math.sin(angle));
-    const hits: number[] = [];
-    for (const height of probeHeights) {
-      const ray = new Ray(
-        new Vector3(floorPoint.x, floorPoint.y + height, floorPoint.z),
-        direction,
-        maxDistance,
-      );
-      const pick = scene.pickWithRay(
-        ray,
-        (mesh) => modelMeshSet.has(mesh) && mesh.isEnabled() && mesh.isVisible,
-        false,
-      );
-      if (pick?.hit && pick.distance > minimumDistance && pick.distance <= maxDistance) {
-        hits.push(pick.distance);
-      }
-    }
-    rawDistances.push(hits.length ? Math.max(...hits) : null);
+    rawDistances.push(wallDistance(
+      scene,
+      rayOrigin,
+      direction,
+      probeHeights,
+      modelMeshSet,
+      wallHeight,
+      diagonal,
+      minimumDistance,
+      maxDistance,
+    ));
   }
 
   const validCount = rawDistances.filter((value) => value !== null).length;
   const filled = fillMissingDistances(rawDistances);
-  if (!filled) return fallbackResult(options.fallbackWidth, options.fallbackDepth);
+  if (!filled) return fallbackResult(options.fallbackWidth, options.fallbackDepth, floorY);
   const smoothed = smoothDistances(filled);
   let worldPoints: Point2[] = smoothed.map((distance, index) => {
     const angle = (index / rayCount) * Math.PI * 2;
@@ -211,17 +464,18 @@ export function traceRoomPolygon(
     tolerance *= 1.35;
     worldPoints = simplifyClosed(worldPoints, tolerance);
   }
-  if (worldPoints.length < 3) return fallbackResult(options.fallbackWidth, options.fallbackDepth);
+  if (worldPoints.length < 3) return fallbackResult(options.fallbackWidth, options.fallbackDepth, floorY);
 
   const points = worldPoints.map((point) => roundPoint({ x: point.x / scale, z: point.z / scale }));
   const size = dimensions(points);
   if (size.width < 0.15 || size.depth < 0.15) {
-    return fallbackResult(options.fallbackWidth, options.fallbackDepth);
+    return fallbackResult(options.fallbackWidth, options.fallbackDepth, floorY);
   }
   return {
     points,
     width: size.width,
     depth: size.depth,
+    floorY,
     confidence: validCount / rayCount,
     usedFallback: false,
   };
