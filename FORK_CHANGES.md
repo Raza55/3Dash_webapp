@@ -91,6 +91,9 @@ entsprechenden Editor-Funktionen gesetzt.
   Linie mit Start- und Endpunkt zeichnen. Ihre Endpunkte können einzeln verschoben und
   die komplette Linie kann ausgewählt oder gelöscht werden. Eine erneute Raumerkennung
   behandelt diese endlichen Segmente wie Wände; sie werden dauerhaft pro Raum gespeichert.
+- Virtuelle Begrenzungswände können bereits vor der ersten Raumerkennung gezeichnet
+  werden. In diesem Zustand zeigt die 3D-Ansicht nur Linien und Endpunkte, keine
+  künstliche Startfläche; die Erkennung übernimmt und rebasiert diese Grenzen.
 - Raumflächen auf derselben Höhenebene dürfen sich nicht überlagern. Die Prüfung arbeitet
   mit den tatsächlichen, auch konkaven Polygonen und erlaubt gemeinsame Kanten und Ecken.
   Konflikte werden rot und mit den betroffenen Raumnamen angezeigt; Raum- und globales

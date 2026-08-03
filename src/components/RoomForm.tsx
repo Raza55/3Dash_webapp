@@ -332,10 +332,18 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
 
       <AccordionSection title={t('rooms.zone')} defaultOpen>
         {!hasZone ? (
-          <div className="room-zone-empty">
-            <strong>{t('rooms.noZone')}</strong>
-            <span>{t('rooms.noZoneHint')}</span>
-          </div>
+          <>
+            <div className="room-zone-empty">
+              <strong>{t('rooms.noZone')}</strong>
+              <span>{t('rooms.noZoneHint')}</span>
+            </div>
+            {virtualWalls.length > 0 && (
+              <div className="room-zone-summary">
+                <span>{t('rooms.virtualWalls')}</span>
+                <span>{t('rooms.virtualWallsCount', { count: virtualWalls.length })}</span>
+              </div>
+            )}
+          </>
         ) : (
           <>
             <div className="room-zone-summary">

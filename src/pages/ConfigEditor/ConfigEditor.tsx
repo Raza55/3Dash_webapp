@@ -1426,6 +1426,7 @@ export default function ConfigEditor() {
     if (!scene) return;
     clearPreview();
 
+    const zoneVisible = roomZoneReadyRef.current;
     const points = info.points.length >= 3
       ? info.points.map((point) => ({ ...point }))
       : rectangleRoomZonePoints(info.size.width, info.size.depth);
@@ -1444,7 +1445,8 @@ export default function ConfigEditor() {
     root.position.set(pos.x, pos.y, pos.z);
     root.rotation.y = Tools.ToRadians(info.rotation.y);
     root.metadata = { previewTarget: 'roomCentre', roomEditorTarget: 'centre' };
-    root.isPickable = true;
+    root.isPickable = zoneVisible;
+    root.isVisible = zoneVisible;
     if (entityScaleRootRef.current) root.parent = entityScaleRootRef.current;
     const centreMaterial = new StandardMaterial('room-preview-centre-material', scene);
     centreMaterial.diffuseColor = new Color3(1, 0.72, 0.18);
@@ -1462,7 +1464,8 @@ export default function ConfigEditor() {
     const surface = createRoomZoneSurface(scene, 'room-preview-surface', points, height, true);
     surface.parent = root;
     surface.metadata = { previewTarget: 'roomZone' };
-    surface.isPickable = true;
+    surface.isPickable = zoneVisible;
+    surface.isVisible = zoneVisible;
     const surfaceMaterial = new StandardMaterial('room-preview-surface-material', scene);
     surfaceMaterial.diffuseColor = hasOverlap ? new Color3(0.82, 0.12, 0.18) : new Color3(0.08, 0.55, 0.82);
     surfaceMaterial.emissiveColor = hasOverlap ? new Color3(0.48, 0.03, 0.06) : new Color3(0.04, 0.32, 0.5);
@@ -1479,6 +1482,7 @@ export default function ConfigEditor() {
     outline.color = hasOverlap ? new Color3(1, 0.24, 0.3) : new Color3(0.25, 0.82, 1);
     outline.alpha = 1;
     outline.isPickable = false;
+    outline.isVisible = zoneVisible;
     outline.metadata = { previewTarget: 'roomOutline' };
 
     const applyOverlapStyle = (overlapping: boolean) => {
@@ -1605,7 +1609,7 @@ export default function ConfigEditor() {
       });
     });
 
-    createRoomZoneLabel(
+    const previewLabel = createRoomZoneLabel(
       scene,
       'preview',
       info.name,
@@ -1614,6 +1618,7 @@ export default function ConfigEditor() {
       root,
       true,
     );
+    previewLabel.label.isVisible = zoneVisible;
 
     const selectedPoint = roomSelectedPointRef.current !== null
       && roomSelectedPointRef.current < points.length
@@ -1631,7 +1636,8 @@ export default function ConfigEditor() {
       handle.parent = root;
       handle.position.set(point.x, height + handleSize * 0.55, point.z);
       handle.metadata = { previewTarget: 'roomPoint', roomEditorTarget: 'point', roomPointIndex: index };
-      handle.isPickable = true;
+      handle.isPickable = zoneVisible;
+      handle.isVisible = zoneVisible;
       const material = new StandardMaterial(`room-preview-point-material-${index}`, scene);
       const isSelected = roomGizmoActiveRef.current && index === selectedPoint;
       material.diffuseColor = isSelected ? new Color3(0.98, 0.76, 0.18) : new Color3(0.18, 0.72, 0.96);
@@ -4924,42 +4930,46 @@ export default function ConfigEditor() {
             })}
           </div>
         )}
-        {roomPanelOpen && roomZoneReady && (
-          <div className="editor-view-toolbar editor-room-toolbar" role="toolbar" aria-label={t('rooms.pointTools')}>
-            <button
-              className={`editor-view-tool-btn${roomGizmoActive && roomSelectedPoint === null && roomSelectedVirtualWallEndpoint === null ? ' active' : ''}`}
-              onClick={handleSelectRoomCentre}
-              aria-label={t('rooms.selectCentre')}
-              aria-pressed={roomGizmoActive && roomSelectedPoint === null && roomSelectedVirtualWallEndpoint === null}
-              title={t('rooms.selectCentre')}
-            >
-              <MapPin size={16} strokeWidth={1.8} aria-hidden="true" />
-            </button>
-            <button
-              className="editor-view-tool-btn"
-              onClick={handleAddRoomPoint}
-              aria-label={t('rooms.addPoint')}
-              title={t('rooms.addPoint')}
-            >
-              <Plus size={16} strokeWidth={1.8} aria-hidden="true" />
-            </button>
-            <button
-              className="editor-view-tool-btn"
-              onClick={handleRemoveRoomPoint}
-              disabled={roomSelectedPoint === null || roomPointCount <= 3}
-              aria-label={t('rooms.removePoint')}
-              title={t('rooms.removePoint')}
-            >
-              <Trash2 size={15} strokeWidth={1.8} aria-hidden="true" />
-            </button>
-            <button
-              className="editor-view-tool-btn"
-              onClick={handleResetRoomPoints}
-              aria-label={t('rooms.resetRectangle')}
-              title={t('rooms.resetRectangle')}
-            >
-              <Square size={15} strokeWidth={1.8} aria-hidden="true" />
-            </button>
+        {roomPanelOpen && (
+          <div className="editor-view-toolbar editor-room-toolbar" role="toolbar" aria-label={t('rooms.boundaryTools')}>
+            {roomZoneReady && (
+              <>
+                <button
+                  className={`editor-view-tool-btn${roomGizmoActive && roomSelectedPoint === null && roomSelectedVirtualWallEndpoint === null ? ' active' : ''}`}
+                  onClick={handleSelectRoomCentre}
+                  aria-label={t('rooms.selectCentre')}
+                  aria-pressed={roomGizmoActive && roomSelectedPoint === null && roomSelectedVirtualWallEndpoint === null}
+                  title={t('rooms.selectCentre')}
+                >
+                  <MapPin size={16} strokeWidth={1.8} aria-hidden="true" />
+                </button>
+                <button
+                  className="editor-view-tool-btn"
+                  onClick={handleAddRoomPoint}
+                  aria-label={t('rooms.addPoint')}
+                  title={t('rooms.addPoint')}
+                >
+                  <Plus size={16} strokeWidth={1.8} aria-hidden="true" />
+                </button>
+                <button
+                  className="editor-view-tool-btn"
+                  onClick={handleRemoveRoomPoint}
+                  disabled={roomSelectedPoint === null || roomPointCount <= 3}
+                  aria-label={t('rooms.removePoint')}
+                  title={t('rooms.removePoint')}
+                >
+                  <Trash2 size={15} strokeWidth={1.8} aria-hidden="true" />
+                </button>
+                <button
+                  className="editor-view-tool-btn"
+                  onClick={handleResetRoomPoints}
+                  aria-label={t('rooms.resetRectangle')}
+                  title={t('rooms.resetRectangle')}
+                >
+                  <Square size={15} strokeWidth={1.8} aria-hidden="true" />
+                </button>
+              </>
+            )}
             <button
               className={`editor-view-tool-btn${roomVirtualWallDrawing ? ' active' : ''}`}
               onClick={handleToggleRoomVirtualWallDrawing}
@@ -4978,18 +4988,22 @@ export default function ConfigEditor() {
             >
               <Eraser size={15} strokeWidth={1.8} aria-hidden="true" />
             </button>
-            <button
-              className={`editor-view-tool-btn${roomSplitDrawing || roomSplitPieces.length ? ' active' : ''}`}
-              onClick={handleToggleRoomSplit}
-              aria-label={t(roomSplitDrawing || roomSplitPieces.length ? 'rooms.cancelSplit' : 'rooms.splitZone')}
-              aria-pressed={roomSplitDrawing || roomSplitPieces.length > 0}
-              title={t(roomSplitDrawing || roomSplitPieces.length ? 'rooms.cancelSplit' : 'rooms.splitZone')}
-            >
-              <Scissors size={15} strokeWidth={1.8} aria-hidden="true" />
-            </button>
-            <span className="editor-room-point-count" aria-label={t('rooms.pointsCount', { count: roomPointCount })}>
-              {roomPointCount}
-            </span>
+            {roomZoneReady && (
+              <>
+                <button
+                  className={`editor-view-tool-btn${roomSplitDrawing || roomSplitPieces.length ? ' active' : ''}`}
+                  onClick={handleToggleRoomSplit}
+                  aria-label={t(roomSplitDrawing || roomSplitPieces.length ? 'rooms.cancelSplit' : 'rooms.splitZone')}
+                  aria-pressed={roomSplitDrawing || roomSplitPieces.length > 0}
+                  title={t(roomSplitDrawing || roomSplitPieces.length ? 'rooms.cancelSplit' : 'rooms.splitZone')}
+                >
+                  <Scissors size={15} strokeWidth={1.8} aria-hidden="true" />
+                </button>
+                <span className="editor-room-point-count" aria-label={t('rooms.pointsCount', { count: roomPointCount })}>
+                  {roomPointCount}
+                </span>
+              </>
+            )}
           </div>
         )}
         <div className="editor-view-toolbar editor-render-toolbar" role="toolbar" aria-label={t('settings.render')}>
