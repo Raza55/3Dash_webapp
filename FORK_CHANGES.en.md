@@ -93,7 +93,8 @@ are used.
   walls, and they are persisted separately for each room.
 - Virtual walls can be drawn before the first room detection. In this state the 3D view
   shows only lines and endpoints, without an artificial starting area; room detection
-  keeps and rebases those boundaries.
+  keeps and rebases those boundaries. A labelled action in the room panel keeps this
+  tool visible and discoverable before detection.
 - Room areas on the same floor cannot overlap. The check uses the actual polygons,
   including concave outlines, while allowing shared edges and corners. Conflicts are
   shown in red with the affected room names, and both room-level and global saving stay

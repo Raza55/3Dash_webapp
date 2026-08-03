@@ -93,7 +93,8 @@ entsprechenden Editor-Funktionen gesetzt.
   behandelt diese endlichen Segmente wie Wände; sie werden dauerhaft pro Raum gespeichert.
 - Virtuelle Begrenzungswände können bereits vor der ersten Raumerkennung gezeichnet
   werden. In diesem Zustand zeigt die 3D-Ansicht nur Linien und Endpunkte, keine
-  künstliche Startfläche; die Erkennung übernimmt und rebasiert diese Grenzen.
+  künstliche Startfläche; die Erkennung übernimmt und rebasiert diese Grenzen. Ein
+  beschrifteter Button im Raum-Panel macht das Werkzeug vor der Erkennung direkt sichtbar.
 - Raumflächen auf derselben Höhenebene dürfen sich nicht überlagern. Die Prüfung arbeitet
   mit den tatsächlichen, auch konkaven Polygonen und erlaubt gemeinsame Kanten und Ecken.
   Konflikte werden rot und mit den betroffenen Raumnamen angezeigt; Raum- und globales

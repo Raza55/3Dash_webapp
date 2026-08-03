@@ -5136,10 +5136,12 @@ export default function ConfigEditor() {
           hasZone={roomZoneReady}
           overlappingRoomNames={roomOverlapNames}
           placingMode={placingMode}
+          virtualWallDrawing={roomVirtualWallDrawing}
           onPositionChange={handlePositionChange}
           onPreviewChange={handleRoomPreviewChange}
           onEnterPlacingMode={enterPlacingMode}
           onExitPlacingMode={exitPlacingMode}
+          onToggleVirtualWallDrawing={handleToggleRoomVirtualWallDrawing}
           onSave={handleSaveRoom}
           onClose={handleCloseRoomPanel}
         />

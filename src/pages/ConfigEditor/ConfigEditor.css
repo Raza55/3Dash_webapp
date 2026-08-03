@@ -484,6 +484,22 @@
 
 .btn-ghost:hover { border-color: var(--border2); color: var(--text); }
 
+.room-boundary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #f2a34a;
+  border-color: rgba(242, 163, 74, 0.45);
+}
+
+.room-boundary-action:hover,
+.room-boundary-action.active {
+  color: #ffc06b;
+  background: rgba(242, 163, 74, 0.1);
+  border-color: #f2a34a;
+}
+
 /* Canvas area */
 .canvas-area {
   flex: 1;

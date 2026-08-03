@@ -6,6 +6,7 @@ import { AccordionSection, FormPanel } from './FormPanel';
 import { SliderNumberRow, VectorSliderFields } from './EditorSliderControls';
 import { useTranslation } from '../contexts/LanguageContext';
 import { rectangleRoomZonePoints } from '../babylon/RoomZoneMeshFactory';
+import { Minus } from 'lucide-react';
 
 export interface RoomPreviewInfo {
   name: string;
@@ -42,10 +43,12 @@ interface Props {
   hasZone: boolean;
   overlappingRoomNames: string[];
   placingMode: boolean;
+  virtualWallDrawing: boolean;
   onPositionChange: (position: LightPosition) => void;
   onPreviewChange: (info: RoomPreviewInfo) => void;
   onEnterPlacingMode: () => void;
   onExitPlacingMode: () => void;
+  onToggleVirtualWallDrawing: () => void;
   onSave: (room: RoomConfig) => void;
   onClose: () => void;
 }
@@ -74,8 +77,8 @@ function pointBounds(points: RoomZonePoint[]): { width: number; depth: number } 
 
 const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
   open, room, isNew, position, areas, entities, placedEntityIds, defaultZone, placingMode,
-  hasZone, overlappingRoomNames, onPositionChange, onPreviewChange, onEnterPlacingMode,
-  onExitPlacingMode, onSave, onClose,
+  hasZone, overlappingRoomNames, virtualWallDrawing, onPositionChange, onPreviewChange,
+  onEnterPlacingMode, onExitPlacingMode, onToggleVirtualWallDrawing, onSave, onClose,
 }, ref) {
   const t = useTranslation();
   const [name, setName] = useState('');
@@ -299,6 +302,16 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
   const visibleEntities = showAll ? roomEntities : roomEntities.slice(0, 16);
   const footer = (
     <>
+      {!hasZone && (
+        <button
+          className={`btn btn-ghost room-boundary-action${virtualWallDrawing ? ' active' : ''}`}
+          onClick={onToggleVirtualWallDrawing}
+          aria-pressed={virtualWallDrawing}
+        >
+          <Minus size={15} strokeWidth={2.2} aria-hidden="true" />
+          {t(virtualWallDrawing ? 'rooms.cancelVirtualWall' : 'rooms.drawVirtualWall')}
+        </button>
+      )}
       <button className="btn btn-primary" onClick={placingMode ? onExitPlacingMode : onEnterPlacingMode}>
         {placingMode
           ? t('form.cancelPlacement')
