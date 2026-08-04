@@ -78,13 +78,18 @@ import { createSmartDeviceMesh, rebuildAllSmartDeviceMeshes, removeSmartDeviceMe
 import {
   createRoomZoneLabel,
   createRoomZoneSurface,
+  clampRoomZoneOpacity,
+  DEFAULT_ROOM_ZONE_OPACITY,
+  defaultRoomZoneColor,
   disposeAllRoomZones,
   findOverlappingRoomIds,
   findOverlappingRooms,
   getRoomZoneWorldPoints,
   rebuildAllRoomZones,
   rectangleRoomZonePoints,
+  resolveRoomZoneColor,
   ROOM_FLOOR_TOLERANCE,
+  roomZoneColor3,
   roomZoneOutlinePoints,
   roomZonesOverlap,
   setRoomZoneLabelVisibility,
@@ -188,6 +193,8 @@ function roomPreviewToConfig(
       height: info.size.height,
       depth: info.size.depth,
       rotationY: info.rotation.y,
+      color: info.color,
+      opacity: info.opacity,
       points: info.points.map((point) => ({ ...point })),
       virtualWalls: info.virtualWalls.map((wall) => ({
         start: { ...wall.start },
@@ -509,6 +516,8 @@ export default function ConfigEditor() {
     name: '',
     size: { width: editorDefaultSizes.wall.width, height: 0.025, depth: editorDefaultSizes.wall.depth },
     rotation: { x: 0, y: 0, z: 0 },
+    color: defaultRoomZoneColor('__room-preview__'),
+    opacity: DEFAULT_ROOM_ZONE_OPACITY,
     points: rectangleRoomZonePoints(editorDefaultSizes.wall.width, editorDefaultSizes.wall.depth),
     virtualWalls: [],
   });
@@ -598,6 +607,8 @@ export default function ConfigEditor() {
         name: '',
         size: { width: editorDefaultSizes.wall.width, height: 0.025, depth: editorDefaultSizes.wall.depth },
         rotation: { x: 0, y: 0, z: 0 },
+        color: defaultRoomZoneColor('__room-preview__'),
+        opacity: DEFAULT_ROOM_ZONE_OPACITY,
         points: rectangleRoomZonePoints(editorDefaultSizes.wall.width, editorDefaultSizes.wall.depth),
         virtualWalls: [],
       };
@@ -1432,6 +1443,11 @@ export default function ConfigEditor() {
       : rectangleRoomZonePoints(info.size.width, info.size.depth);
     const height = Math.max(0.01, info.size.height);
     const hasOverlap = evaluateRoomOverlaps(pos, info).length > 0;
+    const configuredColor = roomZoneColor3(info.color);
+    const configuredOpacity = clampRoomZoneOpacity(info.opacity);
+    const previewOpacity = roomGizmoActiveRef.current
+      ? Math.min(0.55, configuredOpacity + 0.08)
+      : configuredOpacity;
     const handleSize = Math.min(
       0.11,
       Math.max(0.022, Math.min(info.size.width, info.size.depth) * 0.055),
@@ -1467,9 +1483,9 @@ export default function ConfigEditor() {
     surface.isPickable = zoneVisible;
     surface.isVisible = zoneVisible;
     const surfaceMaterial = new StandardMaterial('room-preview-surface-material', scene);
-    surfaceMaterial.diffuseColor = hasOverlap ? new Color3(0.82, 0.12, 0.18) : new Color3(0.08, 0.55, 0.82);
-    surfaceMaterial.emissiveColor = hasOverlap ? new Color3(0.48, 0.03, 0.06) : new Color3(0.04, 0.32, 0.5);
-    surfaceMaterial.alpha = hasOverlap ? 0.34 : roomGizmoActiveRef.current ? 0.22 : 0.11;
+    surfaceMaterial.diffuseColor = hasOverlap ? new Color3(0.82, 0.12, 0.18) : configuredColor;
+    surfaceMaterial.emissiveColor = hasOverlap ? new Color3(0.48, 0.03, 0.06) : configuredColor.scale(0.45);
+    surfaceMaterial.alpha = hasOverlap ? 0.34 : previewOpacity;
     surfaceMaterial.disableLighting = true;
     surfaceMaterial.backFaceCulling = false;
     surface.material = surfaceMaterial;
@@ -1479,17 +1495,21 @@ export default function ConfigEditor() {
       updatable: true,
     }, scene);
     outline.parent = root;
-    outline.color = hasOverlap ? new Color3(1, 0.24, 0.3) : new Color3(0.25, 0.82, 1);
+    outline.color = hasOverlap
+      ? new Color3(1, 0.24, 0.3)
+      : Color3.Lerp(configuredColor, Color3.White(), 0.3);
     outline.alpha = 1;
     outline.isPickable = false;
     outline.isVisible = zoneVisible;
     outline.metadata = { previewTarget: 'roomOutline' };
 
     const applyOverlapStyle = (overlapping: boolean) => {
-      surfaceMaterial.diffuseColor = overlapping ? new Color3(0.82, 0.12, 0.18) : new Color3(0.08, 0.55, 0.82);
-      surfaceMaterial.emissiveColor = overlapping ? new Color3(0.48, 0.03, 0.06) : new Color3(0.04, 0.32, 0.5);
-      surfaceMaterial.alpha = overlapping ? 0.34 : roomGizmoActiveRef.current ? 0.22 : 0.11;
-      outline.color = overlapping ? new Color3(1, 0.24, 0.3) : new Color3(0.25, 0.82, 1);
+      surfaceMaterial.diffuseColor = overlapping ? new Color3(0.82, 0.12, 0.18) : configuredColor;
+      surfaceMaterial.emissiveColor = overlapping ? new Color3(0.48, 0.03, 0.06) : configuredColor.scale(0.45);
+      surfaceMaterial.alpha = overlapping ? 0.34 : previewOpacity;
+      outline.color = overlapping
+        ? new Color3(1, 0.24, 0.3)
+        : Color3.Lerp(configuredColor, Color3.White(), 0.3);
     };
 
     const splitPieceColors = [
@@ -2426,6 +2446,8 @@ export default function ConfigEditor() {
             name: currentInfo.name,
             size: { ...currentInfo.size, width: detectedSize.width, depth: detectedSize.depth },
             rotation: { x: 0, y: 0, z: 0 },
+            color: currentInfo.color,
+            opacity: currentInfo.opacity,
             points: availableZone.points,
             virtualWalls: rebasedVirtualWalls,
           };
@@ -3849,8 +3871,10 @@ export default function ConfigEditor() {
     handleCancelRoomSplitRef.current();
     const anchor = { x: 0, y: 0, z: 0 };
     const initialPoints = rectangleRoomZonePoints(editorDefaultSizes.wall.width, editorDefaultSizes.wall.depth);
+    const roomId = generateUUID();
+    const roomColor = defaultRoomZoneColor(roomId);
     const draft: RoomConfig = {
-      id: generateUUID(),
+      id: roomId,
       name: area?.name ?? t('rooms.newName'),
       haAreaIds: area ? [area.area_id] : [],
       anchor,
@@ -3859,6 +3883,8 @@ export default function ConfigEditor() {
         height: 0.025,
         depth: editorDefaultSizes.wall.depth,
         rotationY: 0,
+        color: roomColor,
+        opacity: DEFAULT_ROOM_ZONE_OPACITY,
       },
       primaryEntityIds: [],
     };
@@ -3866,6 +3892,8 @@ export default function ConfigEditor() {
       name: draft.name,
       size: { width: editorDefaultSizes.wall.width, height: 0.025, depth: editorDefaultSizes.wall.depth },
       rotation: { x: 0, y: 0, z: 0 },
+      color: roomColor,
+      opacity: DEFAULT_ROOM_ZONE_OPACITY,
       points: initialPoints,
       virtualWalls: [],
     };
@@ -3904,6 +3932,8 @@ export default function ConfigEditor() {
         depth: room.zone.depth,
       },
       rotation: { x: 0, y: room.zone.rotationY ?? 0, z: 0 },
+      color: resolveRoomZoneColor(room),
+      opacity: clampRoomZoneOpacity(room.zone.opacity),
       points: room.zone.points?.map((point) => ({ ...point }))
         ?? rectangleRoomZonePoints(room.zone.width, room.zone.depth),
       virtualWalls: room.zone.virtualWalls?.map((wall) => ({
@@ -4162,6 +4192,8 @@ export default function ConfigEditor() {
           height: roomPreviewInfoRef.current.size.height,
           depth: bounds.depth,
           rotationY: roomPreviewInfoRef.current.rotation.y,
+          color: base.zone.color,
+          opacity: base.zone.opacity,
           points: piece.map((point) => ({ ...point })),
         },
       };

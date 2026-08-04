@@ -144,6 +144,16 @@ entsprechenden Editor-Funktionen gesetzt.
 - Auf schmalen Editorfenstern weicht die Objektliste während der Bearbeitung, sodass
   3D-Fläche, Transformationswerkzeuge und Formular gleichzeitig bedienbar bleiben.
 
+### Raumfarben
+
+- Jede Raumfläche kann eine eigene Farbe und transparente Deckkraft erhalten.
+- Bestehende Räume ohne gespeicherte Farbe bekommen automatisch eine stabile Farbe
+  aus einer gut unterscheidbaren Palette.
+- Rot bleibt als Warnfarbe für echte Überschneidungen auf derselben Ebene reserviert;
+  gemeinsame Kanten und Eckpunkte gelten weiterhin nicht als Konflikt.
+- Farbe und Deckkraft werden mit der Raumkonfiguration gespeichert und von Backup und
+  Wiederherstellung übernommen.
+
 ## Rollos und Cover-Entities
 
 - Die Kategorie Rollos verbindet rechteckige 3D-Rollos mit Home-Assistant-Entities

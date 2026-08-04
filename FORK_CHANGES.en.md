@@ -140,6 +140,16 @@ are used.
 - In narrow editor windows, the object list steps aside while a form is open so the
   3D surface, transform tools, and form remain usable together.
 
+### Room Colours
+
+- Each room area can use its own colour and translucent opacity.
+- Existing rooms without a saved colour automatically receive a stable colour from a
+  visually distinct palette.
+- Red remains reserved as the warning colour for positive-area overlaps on the same
+  floor; shared edges and corners are still allowed.
+- Colour and opacity are stored with the room configuration and included in backup and
+  restore.
+
 ## Blinds and Cover Entities
 
 - The Blinds category connects rectangular 3D blinds to Home Assistant entities in

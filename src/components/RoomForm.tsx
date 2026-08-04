@@ -5,13 +5,21 @@ import { rankRoomEntities, type RoomEntityGroup } from '../utils/roomEntityPrior
 import { AccordionSection, FormPanel } from './FormPanel';
 import { SliderNumberRow, VectorSliderFields } from './EditorSliderControls';
 import { useTranslation } from '../contexts/LanguageContext';
-import { rectangleRoomZonePoints } from '../babylon/RoomZoneMeshFactory';
+import {
+  clampRoomZoneOpacity,
+  DEFAULT_ROOM_ZONE_OPACITY,
+  defaultRoomZoneColor,
+  ROOM_ZONE_COLOR_PALETTE,
+  rectangleRoomZonePoints,
+} from '../babylon/RoomZoneMeshFactory';
 import { Minus } from 'lucide-react';
 
 export interface RoomPreviewInfo {
   name: string;
   size: { width: number; height: number; depth: number };
   rotation: LightPosition;
+  color: string;
+  opacity: number;
   points: RoomZonePoint[];
   virtualWalls: RoomVirtualWall[];
 }
@@ -87,6 +95,8 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
   const [height, setHeight] = useState(defaultZone.height);
   const [depth, setDepth] = useState(defaultZone.depth);
   const [rotationY, setRotationY] = useState(0);
+  const [color, setColor] = useState(() => defaultRoomZoneColor(room?.id ?? 'new-room'));
+  const [opacity, setOpacity] = useState(DEFAULT_ROOM_ZONE_OPACITY);
   const [points, setPoints] = useState<RoomZonePoint[] | null>(null);
   const [virtualWalls, setVirtualWalls] = useState<RoomVirtualWall[]>([]);
   const [primaryEntityIds, setPrimaryEntityIds] = useState<string[]>([]);
@@ -206,6 +216,8 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
     setHeight(room?.zone.height ?? defaultZone.height);
     setDepth(room?.zone.depth ?? defaultZone.depth);
     setRotationY(room?.zone.rotationY ?? 0);
+    setColor(room?.zone.color ?? defaultRoomZoneColor(room?.id ?? 'new-room'));
+    setOpacity(clampRoomZoneOpacity(room?.zone.opacity));
     setPoints(room?.zone.points?.length ? room.zone.points.map(roundPoint) : null);
     setVirtualWalls(room?.zone.virtualWalls?.map(roundVirtualWall) ?? []);
     setPrimaryEntityIds(room?.primaryEntityIds ?? []);
@@ -224,10 +236,12 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
       name,
       size: { width, height, depth },
       rotation: { x: 0, y: rotationY, z: 0 },
+      color,
+      opacity,
       points: effectivePoints,
       virtualWalls,
     });
-  }, [depth, effectivePoints, height, name, onPreviewChange, open, rotationY, virtualWalls, width]);
+  }, [color, depth, effectivePoints, height, name, onPreviewChange, opacity, open, rotationY, virtualWalls, width]);
 
   const handleWidthChange = (nextWidth: number) => {
     const safeWidth = Math.max(0.1, nextWidth);
@@ -292,6 +306,8 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
         height,
         depth,
         rotationY,
+        color,
+        opacity,
         points: points?.map(roundPoint),
         virtualWalls: virtualWalls.length ? virtualWalls.map(roundVirtualWall) : undefined,
       },
@@ -380,6 +396,48 @@ const RoomForm = forwardRef<RoomFormHandle, Props>(function RoomForm({
             <SliderNumberRow label={t('rooms.rotation')} value={rotationY} onChange={setRotationY} step={0.5} span={45} min={-180} max={180} />
           </>
         )}
+      </AccordionSection>
+
+      <AccordionSection title={t('rooms.appearance')} defaultOpen>
+        <div className="field-group">
+          <label className="field-label">{t('rooms.floorColor')}</label>
+          <div className="room-color-picker">
+            {ROOM_ZONE_COLOR_PALETTE.map((swatch) => (
+              <button
+                key={swatch}
+                type="button"
+                className={`room-color-swatch${color.toLowerCase() === swatch ? ' active' : ''}`}
+                style={{ backgroundColor: swatch }}
+                onClick={() => setColor(swatch)}
+                title={swatch}
+                aria-label={`${t('rooms.floorColor')} ${swatch}`}
+                aria-pressed={color.toLowerCase() === swatch}
+              />
+            ))}
+            <input
+              type="color"
+              className="room-color-custom"
+              value={color}
+              onChange={(event) => setColor(event.target.value)}
+              title={t('rooms.customColor')}
+              aria-label={t('rooms.customColor')}
+            />
+          </div>
+        </div>
+        <SliderNumberRow
+          label={t('rooms.opacity')}
+          value={Math.round(opacity * 100)}
+          onChange={(value) => setOpacity(clampRoomZoneOpacity(value / 100))}
+          step={1}
+          span={20}
+          min={4}
+          max={55}
+          fallback={14}
+        />
+        <div className="room-color-hint">
+          <span className="room-color-conflict-dot" aria-hidden="true" />
+          {t('rooms.conflictColorHint')}
+        </div>
       </AccordionSection>
 
       {hasZone && (

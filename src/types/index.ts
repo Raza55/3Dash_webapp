@@ -172,6 +172,10 @@ export interface SmartDeviceConfig {
 export interface RoomZone {
   width: number;
   depth: number;
+  /** Hex colour used for the translucent floor overlay. */
+  color?: string;
+  /** Floor overlay opacity between 0 and 1. */
+  opacity?: number;
   /** Optional polygon vertices relative to the room anchor on the floor plane. */
   points?: RoomZonePoint[];
   /** Editor-defined line segments that act as finite walls during room detection. */

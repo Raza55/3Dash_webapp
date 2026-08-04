@@ -42,6 +42,45 @@ export interface RoomZoneLabelEntry {
 }
 
 export const ROOM_FLOOR_TOLERANCE = 0.12;
+export const DEFAULT_ROOM_ZONE_OPACITY = 0.14;
+export const ROOM_ZONE_COLOR_PALETTE = [
+  '#38bdf8',
+  '#4ade80',
+  '#fbbf24',
+  '#fb7185',
+  '#2dd4bf',
+  '#a3e635',
+  '#f97316',
+  '#818cf8',
+] as const;
+
+function stableRoomHash(value: string): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index++) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+export function defaultRoomZoneColor(roomId: string): string {
+  return ROOM_ZONE_COLOR_PALETTE[stableRoomHash(roomId) % ROOM_ZONE_COLOR_PALETTE.length];
+}
+
+export function resolveRoomZoneColor(room: Pick<RoomConfig, 'id' | 'zone'>): string {
+  const configured = room.zone.color?.trim();
+  return configured && /^#[\da-f]{6}$/i.test(configured)
+    ? configured
+    : defaultRoomZoneColor(room.id);
+}
+
+export function clampRoomZoneOpacity(opacity?: number): number {
+  if (typeof opacity !== 'number' || !Number.isFinite(opacity)) return DEFAULT_ROOM_ZONE_OPACITY;
+  return Math.min(0.55, Math.max(0.04, opacity));
+}
+
+export function roomZoneColor3(color: string, fallback = ROOM_ZONE_COLOR_PALETTE[0]): Color3 {
+  return Color3.FromHexString(/^#[\da-f]{6}$/i.test(color) ? color : fallback);
+}
 
 export function getRoomZoneWorldPoints(room: RoomConfig): RoomZonePoint[] {
   const angle = Tools.ToRadians(room.zone.rotationY ?? 0);
@@ -414,10 +453,14 @@ export function createRoomZoneMesh(
   zone.isPickable = true;
   if (parent) zone.parent = parent;
 
+  const configuredColor = roomZoneColor3(resolveRoomZoneColor(room));
+  const configuredOpacity = clampRoomZoneOpacity(room.zone.opacity);
   const zoneMaterial = new StandardMaterial(`room-zone-material-${room.id}`, scene);
-  zoneMaterial.diffuseColor = overlapping ? new Color3(0.82, 0.12, 0.18) : new Color3(0.08, 0.55, 0.82);
-  zoneMaterial.emissiveColor = overlapping ? new Color3(0.48, 0.03, 0.06) : new Color3(0.04, 0.27, 0.42);
-  zoneMaterial.alpha = overlapping ? 0.3 : selected ? 0.32 : 0.14;
+  zoneMaterial.diffuseColor = overlapping ? new Color3(0.82, 0.12, 0.18) : configuredColor;
+  zoneMaterial.emissiveColor = overlapping ? new Color3(0.48, 0.03, 0.06) : configuredColor.scale(0.45);
+  zoneMaterial.alpha = overlapping ? 0.3 : selected
+    ? Math.min(0.55, configuredOpacity + 0.1)
+    : configuredOpacity;
   zoneMaterial.disableLighting = true;
   zoneMaterial.backFaceCulling = false;
   zone.material = zoneMaterial;
@@ -426,7 +469,7 @@ export function createRoomZoneMesh(
   }, scene);
   outline.color = overlapping
     ? new Color3(1, 0.24, 0.3)
-    : selected ? new Color3(0.2, 0.78, 1) : new Color3(0.2, 0.65, 0.9);
+    : Color3.Lerp(configuredColor, Color3.White(), selected ? 0.34 : 0.18);
   outline.alpha = overlapping || selected ? 1 : 0.7;
   outline.position.copyFrom(zone.position);
   outline.rotation.copyFrom(zone.rotation);
